@@ -162,6 +162,17 @@ input, select { font: inherit; }
 .topic-card .card-h .dot { flex: none; }
 .topic-card .meta { font-size: 12px; color: var(--faint); padding: 8px 14px 0; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic-card .tree-wrap { padding: 8px 10px 12px 12px; max-height: 460px; overflow: auto; }
+.topic-card .tree-wrap[hidden], .tp[hidden] { display: none; }
+.tp { padding: 10px 12px 2px; border-bottom: 1px solid var(--border); }
+.tp-plot { margin-bottom: 10px; }
+.tp-title { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin: 0 0 2px 2px; }
+.tp-box { height: 140px; }
+.tp-scalars { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.tp-scalars:empty { display: none; }
+.kpi.small { padding: 7px 9px 6px; }
+.kpi.small .kval { font-size: 15px; }
+.kpi.small canvas { height: 28px; }
+.tp-none { font-size: 12px; color: var(--faint); padding: 2px 2px 10px; }
 .empty { padding: 26px 16px; text-align: center; color: var(--faint); font-size: 13px; line-height: 1.6; }
 
 /* JSON tree */
@@ -362,6 +373,8 @@ input, select { font: inherit; }
               <div><b style="color:var(--ax-a)">A</b><span id="dro-a">—</span><small>deg</small></div>
               <div><b style="color:var(--ax-c)">C</b><span id="dro-c">—</span><small>deg</small></div>
             </div>
+            <div class="plot-box" style="height:150px;margin-top:12px"><canvas id="pos-lin-plot"></canvas></div>
+            <div class="plot-box" style="height:120px;margin-top:6px"><canvas id="pos-rot-plot"></canvas></div>
           </div>
         </div>
 
@@ -399,6 +412,7 @@ input, select { font: inherit; }
               <div><span>timing gaps</span><b id="h-gaps">—</b></div>
               <div><span>FMU rejections</span><b id="h-fmurej">—</b></div>
             </div>
+            <div class="plot-box" style="height:110px;margin-top:10px"><canvas id="nis-plot"></canvas></div>
           </div>
         </div>
       </div>
@@ -437,8 +451,8 @@ input, select { font: inherit; }
       <div class="set-group">
         <h3>Plots</h3>
         <div class="set-row"><label for="s-window">Time window [s]</label><input class="field-input" id="s-window" type="number" min="2" max="600" step="1" /></div>
-        <div class="set-row"><label for="s-rate">Telemetry refresh [Hz]</label><input class="field-input" id="s-rate" type="number" min="1" max="60" step="1" />
-          <div class="note">How often other topics are parsed and shown. The EKF and KPI topics are read at full rate.</div></div>
+        <div class="set-row"><label for="s-rate">Telemetry rate [Hz]</label><input class="field-input" id="s-rate" type="number" min="1" max="200" step="1" />
+          <div class="note">How many messages per second of each other topic are read and plotted. The EKF and KPI topics are read at full rate. The message trees refresh 4 times a second.</div></div>
       </div>
     </div>
     <div class="drawer-f">
@@ -474,7 +488,8 @@ const DEFAULTS = {
   toolDiameter: 16,
   toolNose: 260,
   window: 20,
-  telemetryHz: 10,
+  telemetryHz: 50,
+  plotsOff: [],        // topics whose card plots are switched off
   pins: [],            // [{topic, path: [..]}]
   view: "telemetry",
 };
@@ -482,7 +497,9 @@ const DEFAULTS = {
 function loadSettings() {
   let s = {};
   try { s = JSON.parse(localStorage.getItem(STORE_KEY) || "{}") || {}; } catch (_) { s = {}; }
-  return Object.assign(clone(DEFAULTS), s);
+  const c = Object.assign(clone(DEFAULTS), s);
+  if (!c.v2) { c.telemetryHz = Math.max(c.telemetryHz, 50); c.v2 = true; }   // older pages read 10 Hz
+  return c;
 }
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function saveSettings() {
@@ -552,6 +569,12 @@ class TimePlot {
     this.legendValues = opts.legendValues !== false;
     this.dirty = true;
   }
+  addSeries(def) {
+    const i = this.series.length;
+    this.series.push({ name: def.name, color: def.color || SERIES_COLORS[i % SERIES_COLORS.length], t: [], v: [], last: NaN });
+    this.dirty = true;
+    return i;
+  }
   setSeries(defs) {
     this.series = defs.map((d, i) => ({ name: d.name, color: d.color || SERIES_COLORS[i % SERIES_COLORS.length], t: [], v: [], last: NaN }));
     this.dirty = true;
@@ -594,14 +617,31 @@ class TimePlot {
     let span = hi - lo;
     if (span < this.minSpan) { const m = (hi + lo) / 2; lo = m - this.minSpan / 2; hi = m + this.minSpan / 2; span = this.minSpan; }
     lo -= span * 0.08; hi += span * 0.08;
-    const L = this.compact ? 2 : 52, R = this.compact ? 2 : 10, T = this.compact ? 3 : 24, B = this.compact ? 3 : 22;
+    const L = this.compact ? 2 : 52, R = this.compact ? 2 : 10, B = this.compact ? 3 : 22;
+    ctx.font = PLOT_FONT;
+    // legend: as many rows as needed, above the plot
+    const legend = [];
+    if (!this.compact) {
+      let x = L, row = 0;
+      const right = w - R - (this.unit ? ctx.measureText(this.unit).width + 10 : 0);
+      for (const s of this.series) {
+        const label = this.legendValues ? `${s.name} ${Number.isFinite(s.last) ? fmtAuto(s.last) : "—"}` : s.name;
+        const wl = 14 + ctx.measureText(label).width;
+        if (x > L && x + wl > right) { x = L; row++; }
+        legend.push({ x, row, label, color: s.color });
+        x += wl + 16;
+      }
+    }
+    const rows = legend.length ? legend[legend.length - 1].row + 1 : 1;
+    const T = this.compact ? 3 : 10 + rows * 15;
     const pw = w - L - R, ph = h - T - B;
     const X = (t) => L + (t - t0) / (t1 - t0) * pw;
     const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * ph;
-    ctx.font = PLOT_FONT;
     if (!this.compact) {
       // grid + y labels
-      const step = niceStep((hi - lo) / Math.max(2, Math.floor(ph / 38)));
+      let step = niceStep((hi - lo) / Math.max(2, Math.floor(ph / 38)));
+      const nTicks = (st) => Math.floor(hi / st) - Math.ceil(lo / st) + 1;
+      for (const k of [2, 2.5, 2]) if (nTicks(step) < 3) step /= k;   // at least 3 labels
       ctx.strokeStyle = "#232834"; ctx.fillStyle = "#6c7586"; ctx.lineWidth = 1;
       ctx.textAlign = "right"; ctx.textBaseline = "middle";
       for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
@@ -645,13 +685,10 @@ class TimePlot {
     if (!this.compact) {
       // legend with the latest values
       ctx.textAlign = "left"; ctx.textBaseline = "middle";
-      let x = L;
-      for (const s of this.series) {
-        const label = this.legendValues ? `${s.name} ${Number.isFinite(s.last) ? fmtAuto(s.last) : "—"}` : s.name;
-        ctx.fillStyle = s.color; ctx.fillRect(x, 8, 10, 3);
-        ctx.fillStyle = "#c9cfda"; ctx.fillText(label, x + 14, 10);
-        x += ctx.measureText(label).width + 30;
-        if (x > w - 60) break;
+      for (const it of legend) {
+        const y = 10 + it.row * 15;
+        ctx.fillStyle = it.color; ctx.fillRect(it.x, y - 2, 10, 3);
+        ctx.fillStyle = "#c9cfda"; ctx.fillText(it.label, it.x + 14, y);
       }
       if (this.unit) { ctx.textAlign = "right"; ctx.fillStyle = "#6c7586"; ctx.fillText(this.unit, w - R, 10); }
       if (empty) { ctx.textAlign = "center"; ctx.fillStyle = "#5c6576"; ctx.fillText("no data", L + pw / 2, T + ph / 2); }
@@ -817,6 +854,8 @@ function handleMessage(topic, msg, t) {
     if (k !== undefined) kpi.onKpi(topic, k, t);
   }
   pins.onMessage(topic, msg, t);
+  const card = cards.get(topic);
+  if (card && card.plotsOn) card.plots.onMessage(msg, t);
 }
 
 // slow topics, at the telemetry refresh rate
@@ -828,7 +867,7 @@ setInterval(() => {
       parseTopic(s, s.raw, t);
     }
   }
-}, 20);
+}, 5);
 
 // message rates, once a second
 setInterval(() => {
@@ -854,12 +893,21 @@ function syncTopicCards() {
     const el = document.createElement("div");
     el.className = "card topic-card";
     el.innerHTML = `<div class="card-h"><div class="dot idle"></div><span class="tname"></span><span class="grow"></span><span class="stats"></span>
+      <button class="btn small" data-act="plots">Plots</button>
       <button class="btn small" data-act="expand">Expand</button></div>
-      <div class="meta"></div><div class="tree-wrap"><div class="tree"></div></div>`;
+      <div class="meta"></div><div class="tp"></div><div class="tree-wrap"><div class="tree"></div></div>`;
     el.querySelector(".tname").textContent = name;
     const treeEl = el.querySelector(".tree");
     const card = { el, dot: el.querySelector(".dot"), statsEl: el.querySelector(".stats"), metaEl: el.querySelector(".meta"),
-                   tree: new JsonTree(treeEl, name), empty: true };
+                   tree: new JsonTree(treeEl, name), empty: true,
+                   plots: new TopicPlots(el.querySelector(".tp"), name), plotsOn: !cfg.plotsOff.includes(name) };
+    const pb = el.querySelector('[data-act="plots"]');
+    const setPlots = (on) => {
+      card.plotsOn = on; pb.classList.toggle("on", on); el.querySelector(".tp").hidden = !on;
+      cfg.plotsOff = cfg.plotsOff.filter((x) => x !== name).concat(on ? [] : [name]); saveSettings();
+    };
+    setPlots(card.plotsOn);
+    pb.addEventListener("click", () => setPlots(!card.plotsOn));
     treeEl.innerHTML = '<div class="empty">Waiting for messages…</div>';
     el.querySelector('[data-act="expand"]').addEventListener("click", (ev) => {
       const b = ev.currentTarget; const open = b.textContent === "Expand";
@@ -874,6 +922,80 @@ function syncTopicCards() {
 function removeTopicCard(name) {
   const c = cards.get(name);
   if (c) { c.el.remove(); cards.delete(name); }
+}
+
+// Automatic plots of a topic: each array of up to 12 numbers gets a plot, each
+// other number a tile with its value and a sparkline. Counters and times
+// (t_us, timecode, timestamp, ..._id) are left out; everything stays pinnable
+// from the tree below.
+const SKIP_KEY = /^(t_us|timecode|timestamp|time|t|seq|sequence|counter|id|\$date|.*_id)$/i;
+class TopicPlots {
+  constructor(root, topic) {
+    this.root = root; this.topic = topic; this.arrays = new Map(); this.scalars = new Map();
+    root.innerHTML = '<div class="tp-arrays"></div><div class="tp-scalars"></div><div class="tp-none">Waiting for numbers…</div>';
+    this.aEl = root.children[0]; this.sEl = root.children[1]; this.noneEl = root.children[2];
+  }
+  onMessage(msg, t) { this.walk(msg, [], t, 0); }
+  walk(v, path, t, depth) {
+    if (depth > 5) return;
+    if (Array.isArray(v)) {
+      if (v.length >= 1 && v.length <= 12 && v.every((x) => typeof x === "number")) this.pushArray(path, v, t);
+      return;
+    }
+    if (v !== null && typeof v === "object") {
+      for (const k of Object.keys(v)) if (!SKIP_KEY.test(k)) this.walk(v[k], path.concat([k]), t, depth + 1);
+      return;
+    }
+    if (typeof v === "number" && path.length) this.pushScalar(path, v, t);
+  }
+  pushArray(path, v, t) {
+    const key = pathStr(path);
+    let g = this.arrays.get(key);
+    if (!g) { if (this.arrays.size >= 10) return; g = this.addArray(key, v.length); }
+    const n = Math.min(v.length, g.plot.series.length);
+    for (let i = 0; i < n; i++) g.plot.push(i, t, v[i]);
+  }
+  addArray(key, n) {
+    this.noneEl.hidden = true;
+    const el = document.createElement("div"); el.className = "tp-plot";
+    el.innerHTML = '<div class="tp-title"></div><div class="plot-box tp-box"><canvas></canvas></div>';
+    el.querySelector(".tp-title").textContent = key;
+    this.aEl.appendChild(el);
+    const plot = new TimePlot(el.querySelector("canvas"), { window: cfg.window });
+    let names = Array.from({ length: n }, (_, i) => `[${i}]`), colors = null;
+    if (n === 3) names = ["x", "y", "z"];
+    if (n === 5 && /pos/i.test(key)) names = ["X", "Y", "Z", "A", "C"];
+    if (n <= 5) colors = AXIS_COLORS;
+    plot.setSeries(names.map((nm, i) => ({ name: nm, color: colors ? colors[i] : undefined })));
+    const g = { el, plot };
+    this.arrays.set(key, g);
+    return g;
+  }
+  pushScalar(path, v, t) {
+    const key = pathStr(path);
+    let s = this.scalars.get(key);
+    if (!s) { if (this.scalars.size >= 24) return; s = this.addScalar(key); }
+    s.plot.push(0, t, v); s.last = v;
+  }
+  addScalar(key) {
+    this.noneEl.hidden = true;
+    const el = document.createElement("div"); el.className = "kpi small"; el.title = `${this.topic}:${key}`;
+    el.innerHTML = '<div class="kname"></div><div class="kval">—</div><canvas></canvas>';
+    el.querySelector(".kname").textContent = key;
+    this.sEl.appendChild(el);
+    const plot = new TimePlot(el.querySelector("canvas"), { window: cfg.window, compact: true, maxPoints: 800 });
+    plot.setSeries([{ name: key, color: SERIES_COLORS[this.scalars.size % SERIES_COLORS.length] }]);
+    const s = { el, val: el.querySelector(".kval"), plot, last: NaN, shown: NaN };
+    this.scalars.set(key, s);
+    return s;
+  }
+  draw(t) {
+    for (const g of this.arrays.values()) { g.plot.window = cfg.window; g.plot.draw(t); }
+    for (const s of this.scalars.values()) {
+      if (s.last !== s.shown) { s.val.textContent = fmtAuto(s.last); s.shown = s.last; }
+      s.plot.window = cfg.window; s.plot.draw(t);
+    }
+  }
 }
 
 class JsonTree {
@@ -1448,6 +1570,12 @@ const machine = {
     }
     this.force = new TimePlot($("force-plot"), { window: cfg.window, unit: "N", minSpan: 10, legendValues: false });
     this.force.setSeries([{ name: "Fx", color: AXIS_COLORS[0] }, { name: "Fy", color: AXIS_COLORS[1] }, { name: "Fz", color: AXIS_COLORS[2] }, { name: "|F|", color: "#e6e8ec" }]);
+    this.posLin = new TimePlot($("pos-lin-plot"), { window: cfg.window, unit: "mm", minSpan: 1, legendValues: false });
+    this.posLin.setSeries([{ name: "X", color: AXIS_COLORS[0] }, { name: "Y", color: AXIS_COLORS[1] }, { name: "Z", color: AXIS_COLORS[2] }]);
+    this.posRot = new TimePlot($("pos-rot-plot"), { window: cfg.window, unit: "deg", minSpan: 1, legendValues: false });
+    this.posRot.setSeries([{ name: "A", color: AXIS_COLORS[3] }, { name: "C", color: AXIS_COLORS[4] }]);
+    this.nis = new TimePlot($("nis-plot"), { window: cfg.window, minSpan: 1 });
+    this.nis.setSeries([{ name: "NIS", color: "#2dd4bf" }]);
     document.querySelectorAll("[data-cam]").forEach((b) => b.addEventListener("click", () => this.scene && this.scene.view(b.dataset.cam)));
     $("btn-path").addEventListener("click", (e) => {
       if (!this.scene) return; this.scene.showPath = !this.scene.showPath; e.currentTarget.classList.toggle("on", this.scene.showPath); this.scene.dirty = true;
@@ -1458,7 +1586,7 @@ const machine = {
   applySettings() {
     $("pos-path").textContent = `${cfg.ekfTopic} · ${cfg.posPath}`;
     $("kpi-src").textContent = cfg.kpiTopic ? `${cfg.kpiTopic} · ${cfg.kpiField}` : `any topic · ${cfg.kpiField}`;
-    this.force.window = cfg.window; this.force.dirty = true;
+    for (const pl of [this.force, this.posLin, this.posRot, this.nis]) { pl.window = cfg.window; pl.dirty = true; }
     if (this.scene && this.scene.gl) { this.scene.setTool(cfg.toolLength, cfg.toolDiameter, cfg.toolNose); this.scene.dirty = true; }
   },
   // Called for every EKF message (up to ~1 kHz): only data here, the DOM is
@@ -1468,6 +1596,8 @@ const machine = {
     const p = vec(getPath(msg, parsePath(cfg.posPath)), 5, AXES);
     if (p) {
       this.lastPos = t; this.p = p;
+      this.posLin.push(0, t, p[0]); this.posLin.push(1, t, p[1]); this.posLin.push(2, t, p[2]);
+      this.posRot.push(0, t, p[3]); this.posRot.push(1, t, p[4]);
       if (this.scene) this.scene.setPosition(p);
     }
     const f = vec(getPath(msg, parsePath(cfg.forcePath)), 3, ["x", "y", "z"]);
@@ -1479,13 +1609,13 @@ const machine = {
     const c = getPath(msg, parsePath(cfg.cutPath));
     if (typeof c === "boolean") this.cutting = c;
     const h = getPath(msg, parsePath(cfg.healthPath));
-    if (h && typeof h === "object") this.h = h;
+    if (h && typeof h === "object") { this.h = h; if (typeof h.nis === "number") this.nis.push(0, t, h.nis); }
     this.fresh = true;
   },
   renderValues() {
     if (!this.fresh) return;
     this.fresh = false;
-    if (this.p) AXES.forEach((a, i) => { $("dro-" + a).textContent = fmt(this.p[i], 3); });
+    if (this.p) AXES.forEach((a, i) => { $("dro-" + a).textContent = fmt(this.p[i], 2); });
     if (this.f) {
       const f = this.f;
       $("force-norm").innerHTML = `${fmt(Math.hypot(f[0], f[1], f[2]), 1)}<small>N</small>`;
@@ -1623,7 +1753,7 @@ function applySettingsForm() {
   cfg.toolDiameter = num("s-tool-dia", DEFAULTS.toolDiameter, 0.5, 200);
   cfg.toolNose = num("s-tool-nose", DEFAULTS.toolNose, -2000, 2000);
   cfg.window = num("s-window", DEFAULTS.window, 2, 600);
-  cfg.telemetryHz = num("s-rate", DEFAULTS.telemetryHz, 1, 60);
+  cfg.telemetryHz = num("s-rate", DEFAULTS.telemetryHz, 1, 200);
   cfg.signs = [...$("s-signs").querySelectorAll("select")].map((s) => Number(s.value) < 0 ? -1 : 1);
   saveSettings();
   if (oldKpi !== cfg.kpiTopic + "|" + cfg.kpiField) kpi.reset();
@@ -1637,10 +1767,17 @@ function frame() {
   if (!$("view-machine").hidden) {
     if (machine.scene) machine.scene.render();
     machine.force.draw(t);
+    machine.posLin.draw(t); machine.posRot.draw(t); machine.nis.draw(t);
     for (const tile of kpi.tiles.values()) tile.plot.draw(t);
     machine.renderStatus();
   } else {
     if (pins.plot && cfg.pins.length) pins.plot.draw(t);
+    const H = window.innerHeight;
+    for (const c of cards.values()) {
+      if (!c.plotsOn) continue;
+      const r = c.el.getBoundingClientRect();
+      if (r.bottom > 0 && r.top < H) c.plots.draw(t);
+    }
   }
   requestAnimationFrame(frame);
 }

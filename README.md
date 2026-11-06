@@ -127,27 +127,50 @@ disconnects.
 
 ## Browser UI
 
-The repository includes a lightweight browser UI under [`web`](web). It is a
-single `index.html` file with inline CSS and JavaScript — no build tools, no
-Node.js, no npm required. During the CMake build the contents of `web/` are
-embedded into the binary and served at `http://<host>:<http_port>/mads`.
+The repository includes a browser dashboard for the Huron U-Mill 5 under
+[`web`](web). It is a single `index.html` file with inline CSS and JavaScript
+(plots and 3-D drawn with canvas and WebGL, no libraries): no build tools, no
+Node.js, no internet connection needed. During the CMake build the contents of
+`web/` are embedded into the binary and served at `http://<host>:<http_port>/mads`.
 
 The browser page fetches `http://<host>:<http_port>/bootstrap.json` from the
-same origin to learn the WebSocket `scheme`, `port`, and `path`.
+same origin to learn the WebSocket `scheme`, `port`, and `path`, then opens one
+WebSocket per topic and reconnects on its own when the bridge restarts. The
+dot in the top bar shows the connections (green: all open).
 
-The UI provides two tabs:
+Two views, from the left menu (bottom bar on a phone):
 
-- **Listen** — subscribe to one or more MADS topics (or `_all`) and view
-  incoming JSON messages in a collapsible tree
-- **Publish** — pick a topic, edit a JSON payload, and send it into the MADS
-  network
+- **Telemetry**: the subscribed topics (comma-separated, saved in the browser),
+  each with its message rate and the latest message as a live tree. Hover a
+  number and press ◦ to add it to the plot at the top (up to 8 signals).
+  These topics are refreshed at 10 Hz by default.
+- **Machine**: a 3-D model of the machine, positioned by the EKF state, with
+  the tool-tip path drawn on the rotary table; the cutting/air state; the
+  cutting force (|F|, Fx, Fy, Fz and their plot); KPI tiles; the health of the
+  filter. The EKF and KPI topics are read at full rate.
 
-All settings (topics, draft message, publish history) are persisted in
-`localStorage`.
+Defaults, all changeable in Settings (gear, top right):
+
+| Setting | Default | |
+|---|---|---|
+| EKF topic | `eekf_plugin` | |
+| Position field | `eekf.position` | X Y Z [mm], A C [deg], array or `{x, y, z, a, c}` |
+| Force field | `eekf.force_n` | Fx Fy Fz [N] |
+| Cutting flag | `eekf.cutting` | |
+| Health object | `eekf` | `nis`, `measurements`, `rejected_updates`, `overruns`, `gaps`, `fmu_rejections` |
+| KPI topic | empty = any topic | each number in the KPI object becomes a tile with a sparkline |
+| KPI field | `kpi` | |
+| Axis directions | X −1, others +1 | the X table moves opposite to the programmed X |
+| Tool | 110 mm × Ø16, nose at 260 mm | tip 150 mm above the A axis, as in mt_plugin |
+
+Open the page with `?demo` (`http://<host>:<http_port>/mads?demo`) to run it
+on generated data, without the bridge or the machine.
 
 > To enable the browser UI, launch the agent with the option `-w` or `--webserver`.
 > 
 > **NOTE**: upon launch, the command `mads-websockets -w` presents a QR code that links to the WebUI. Since the latter is exposed on unencrypted http://, though, come smartphone could point the browser to `https://<ip>:8080`, which is not available. If that happens, just manually edit the URL from `https://<ip>:8080` to `http://<ip>:8080` (no 's').
+>
+> Publishing from the browser is not part of this dashboard: use `ws_client -p`.
 
 ## `ws_client`
 

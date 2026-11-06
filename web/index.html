@@ -2,719 +2,1675 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MADS WebSocket Bridge</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>U-Mill 5 Monitor</title>
+<!--
+  MADS live dashboard for the Huron U-Mill 5, served by mads-websockets (-w).
+  Single file, no external resources: it must work on a workshop LAN without internet.
+
+  Two views (left menu, or bottom bar on a phone):
+    Telemetry  every message of the subscribed topics, as a live tree; any number
+               can be pinned to the plot at the top
+    Machine    3-D model positioned by the EKF state (eekf.position), cutting
+               force (eekf.force_n), KPI tiles (any message with a "kpi" object)
+               and the health of the filter
+  Topics and field paths are in Settings (gear, top right), saved in this browser.
+  Without the bridge, open the page with ?demo to see it run on generated data.
+-->
 <style>
+:root {
+  --bg: #0e1014;
+  --panel: #161920;
+  --panel-2: #1c2029;
+  --border: #272c37;
+  --border-2: #333a48;
+  --text: #e6e8ec;
+  --muted: #8b93a4;
+  --faint: #5c6576;
+  --accent: #4c8dff;
+  --ok: #2ecc71;
+  --warn: #f5a623;
+  --bad: #ff5a52;
+  --ax-x: #ff5c6c;
+  --ax-y: #3ddc84;
+  --ax-z: #3d9bff;
+  --ax-a: #ffaa33;
+  --ax-c: #a68cff;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --side-w: 208px;
+  --top-h: 56px;
+}
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  background: #e7dfd0;
-  color: #2a1d11;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-.header {
-  padding: 20px 22px 6px;
-  text-align: center;
-}
-.header img { width: 220px; height: 72px; object-fit: contain; }
-.header h1 { font-size: 30px; font-weight: 800; color: #2a1d11; margin-top: 10px; }
-.tab-bar {
-  display: flex; gap: 10px; padding: 18px 18px 0;
-}
-.tab-btn {
-  flex: 1; border-radius: 16px; border: 1px solid #cfbea3; background: #f5efe3;
-  padding: 12px; text-align: center; font-size: 15px; font-weight: 700;
-  color: #5c4f43; cursor: pointer; transition: background .15s, color .15s;
-}
-.tab-btn:hover { background: #ebe3d3; }
-.tab-btn.active { background: #2a1d11; border-color: #2a1d11; color: #fff7ea; }
-.content { flex: 1; padding: 18px; padding-bottom: 28px; }
-.panel {
-  border-radius: 26px; background: #fbf7ef; border: 1px solid #d8cab2;
-  padding: 18px; display: flex; flex-direction: column; gap: 16px;
-}
-.panel[hidden] { display: none; }
-.section-title { font-size: 24px; font-weight: 800; color: #2a1d11; }
-.section-body { font-size: 15px; line-height: 22px; color: #5c4f43; }
-.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.subscribe-row { display: flex; gap: 10px; align-items: stretch; }
-.subscribe-row .input-wrap { flex: 1; }
-input[type="text"], textarea {
-  width: 100%; border-radius: 16px; border: 1px solid #d8cab2; background: #fffdf8;
-  padding: 12px 16px; font-size: 15px; color: #2a1d11; outline: none;
-  font-family: inherit;
-}
-input[type="text"]:focus, textarea:focus { border-color: #b08d60; }
-textarea { min-height: 140px; resize: vertical; font-family: "SF Mono", "Menlo", "Consolas", monospace; font-size: 14px; }
-.btn-primary {
-  border-radius: 16px; background: #b65f2a; color: #fff8ef; padding: 14px 18px;
-  font-size: 15px; font-weight: 800; border: none; cursor: pointer; text-align: center;
-  min-width: 124px;
-}
-.btn-primary:hover { background: #a3521f; }
-.btn-primary:disabled { opacity: .45; cursor: default; }
-.btn-secondary {
-  border-radius: 14px; border: 1px solid #d0bf9f; background: #f5ede0;
-  padding: 12px 14px; font-size: 14px; font-weight: 700; color: #4c4033;
-  cursor: pointer;
-}
-.btn-secondary:hover { background: #ebe3d3; }
-.info-card {
-  border-radius: 16px; background: #f5ede0; border: 1px solid #d8cab2; padding: 14px 16px;
-}
-.info-card-label { font-size: 13px; font-weight: 700; color: #7d6e5c; margin-bottom: 4px; }
-.info-card-value { font-size: 15px; font-weight: 700; color: #2a1d11; word-break: break-all; }
-.info-card-hint { font-size: 13px; color: #9f927e; margin-top: 4px; }
-.status-pill {
-  border-radius: 14px; padding: 10px 14px; font-size: 14px; font-weight: 600;
-  border: 1px solid transparent;
-}
-.status-neutral  { background: #eee2ca; border-color: #d4b98d; color: #5c4f43; }
-.status-success  { background: #dff0d6; border-color: #8eb87d; color: #3a5e2e; }
-.status-warning  { background: #f7e8b7; border-color: #d4b25f; color: #6a5520; }
-.status-danger   { background: #f6d5d1; border-color: #d67a6e; color: #8b2e22; }
-.empty-state {
-  font-size: 14px; color: #9f927e; text-align: center; padding: 24px 0;
-  font-style: italic;
-}
-.field { display: flex; flex-direction: column; gap: 8px; }
-.field-label { font-size: 14px; font-weight: 700; color: #4c4033; }
-.validation { font-size: 13px; font-weight: 600; }
-.validation-ok { color: #4a8a3a; }
-.validation-err { color: #c0392b; }
-.dropdown-menu {
-  border-radius: 14px; border: 1px solid #d8cab2; background: #fffdf8;
+  background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px;
   overflow: hidden;
 }
-.dropdown-item {
-  padding: 10px 16px; cursor: pointer; font-size: 14px; color: #2a1d11;
-  border-bottom: 1px solid #eee6d8;
+button { font: inherit; color: inherit; }
+input, select { font: inherit; }
+
+/* ---------- top bar ---------- */
+.topbar {
+  position: fixed; inset: 0 0 auto 0; height: var(--top-h); z-index: 20;
+  display: flex; align-items: center; gap: 14px; padding: 0 14px 0 16px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
 }
-.dropdown-item:last-child { border-bottom: none; }
-.dropdown-item:hover { background: #f5ede0; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand img { height: 26px; width: auto; display: block; }
+.brand .title { font-weight: 700; letter-spacing: .3px; white-space: nowrap; }
+.brand .sub { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.topbar .spacer { flex: 1; }
+.conn {
+  display: flex; align-items: center; gap: 9px; padding: 6px 12px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--border); font-size: 13px; white-space: nowrap;
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 8px var(--bad); flex: none; }
+.dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.dot.idle { background: var(--faint); box-shadow: none; }
+.dot.pulse { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+.conn .addr { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;
+  border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2); cursor: pointer;
+}
+.icon-btn:hover { border-color: var(--border-2); background: #232835; }
+.icon-btn svg { width: 18px; height: 18px; }
+
+/* ---------- side menu ---------- */
+.side {
+  position: fixed; top: var(--top-h); bottom: 0; left: 0; width: var(--side-w); z-index: 15;
+  background: var(--panel); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; padding: 14px 10px; gap: 4px;
+}
+.nav-btn {
+  display: flex; align-items: center; gap: 11px; width: 100%; padding: 11px 12px; border-radius: 10px;
+  border: 1px solid transparent; background: none; cursor: pointer; text-align: left;
+  color: var(--muted); font-weight: 600;
+}
+.nav-btn svg { width: 19px; height: 19px; flex: none; }
+.nav-btn:hover { background: var(--panel-2); color: var(--text); }
+.nav-btn.active { background: #1f2a40; border-color: #2c3d5e; color: #fff; }
+.side .group { margin-top: 18px; padding: 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .8px; color: var(--faint); text-transform: uppercase; }
+.side-topics { display: flex; flex-direction: column; gap: 2px; padding: 6px 4px 0; overflow-y: auto; min-height: 0; }
+.side-topic { display: flex; align-items: center; gap: 8px; padding: 5px 6px; font-size: 12px; color: var(--muted); }
+.side-topic .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.side-topic .hz { font-family: var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+
+/* ---------- main ---------- */
+.main { position: fixed; top: var(--top-h); left: var(--side-w); right: 0; bottom: 0; overflow: hidden; }
+.view { position: absolute; inset: 0; overflow-y: auto; padding: 18px; }
+.view[hidden] { display: none; }
+
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; }
+.card-h {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border);
+  font-size: 12px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--muted);
+}
+.card-h .grow { flex: 1; }
+.card-b { padding: 14px; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.btn {
+  border: 1px solid var(--border-2); background: var(--panel-2); border-radius: 9px; padding: 8px 12px;
+  cursor: pointer; font-weight: 600; font-size: 13px; white-space: nowrap;
+}
+.btn:hover { background: #252b38; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: #3b7cf0; }
+.btn.small { padding: 5px 9px; font-size: 12px; border-radius: 8px; }
+.btn.on { background: #1f2a40; border-color: #35507f; color: #cfe0ff; }
+
+.field-input {
+  width: 100%; background: var(--bg); border: 1px solid var(--border-2); color: var(--text);
+  border-radius: 9px; padding: 9px 11px; outline: none; font-family: var(--mono); font-size: 13px;
+}
+.field-input:focus { border-color: var(--accent); }
+
+.banner {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 11px 14px; border-radius: 12px;
+  border: 1px solid #5a3a1a; background: #2a1d10; color: #ffd9a6; margin-bottom: 14px; font-size: 13px;
+}
+.banner[hidden] { display: none; }
+.banner .grow { flex: 1; min-width: 200px; }
+
+/* ---------- telemetry view ---------- */
+.subscribe { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.subscribe .field-input { flex: 1; min-width: 220px; }
+.hint { font-size: 12px; color: var(--faint); margin-top: 8px; }
+.pinned { margin-top: 14px; }
+.pinned[hidden] { display: none; }
+.plot-box { position: relative; height: 230px; }
+.plot-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.pin-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 12px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 9px; border-radius: 999px;
+  border: 1px solid var(--border-2); font-size: 12px; font-family: var(--mono); background: var(--panel-2);
+}
+.chip i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.chip button { border: none; background: none; cursor: pointer; color: var(--muted); padding: 0 5px; font-size: 14px; line-height: 1; }
+.chip button:hover { color: var(--text); }
+.topic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; margin-top: 14px; align-items: start; }
+.topic-card .card-h { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); }
+.topic-card .tname { font-family: var(--mono); font-weight: 700; }
+.topic-card .tname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topic-card .stats { font-family: var(--mono); font-size: 12px; color: var(--muted); font-weight: 400; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.topic-card .card-h .btn { flex: none; }
+.topic-card .card-h .dot { flex: none; }
+.topic-card .meta { font-size: 12px; color: var(--faint); padding: 8px 14px 0; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topic-card .tree-wrap { padding: 8px 10px 12px 12px; max-height: 460px; overflow: auto; }
+.empty { padding: 26px 16px; text-align: center; color: var(--faint); font-size: 13px; line-height: 1.6; }
+
 /* JSON tree */
-.message-card {
-  border-radius: 16px; background: #f9f4eb; border: 1px solid #e0d5c3;
-  padding: 12px 14px; overflow-x: auto;
+.tree { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
+.tree details > summary { list-style: none; cursor: pointer; user-select: none; border-radius: 5px; padding: 0 4px; }
+.tree details > summary::-webkit-details-marker { display: none; }
+.tree details > summary::before { content: "▸"; display: inline-block; width: 13px; color: var(--faint); }
+.tree details[open] > summary::before { content: "▾"; }
+.tree details > summary:hover { background: #202533; }
+.tree .kids { margin-left: 14px; border-left: 1px solid #252a35; padding-left: 4px; }
+.tree .leaf { display: flex; align-items: baseline; gap: 6px; padding: 0 4px 0 17px; border-radius: 5px; }
+.tree .leaf:hover { background: #1d2230; }
+.tree .k { color: #9fb2cf; }
+.tree .sum { color: var(--faint); margin-left: 6px; }
+.tree .v { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree .num { color: #7cc4ff; font-variant-numeric: tabular-nums; }
+.tree .str { color: #e9b46a; }
+.tree .bool { color: #d58cff; }
+.tree .nul { color: var(--faint); font-style: italic; }
+.tree .pin {
+  border: none; background: none; cursor: pointer; color: var(--faint); font-size: 12px; padding: 0 2px;
+  opacity: 0; transition: opacity .1s;
 }
-.tree-node { font-family: "SF Mono", "Menlo", "Consolas", monospace; font-size: 13px; }
-.tree-node details { margin-left: 14px; }
-.tree-node details:first-child { margin-left: 0; }
-.tree-node summary {
-  cursor: pointer; list-style: none; user-select: none; padding: 1px 0;
+.tree .leaf:hover .pin { opacity: 1; }
+.tree .pin.on { opacity: 1; color: var(--accent); }
+
+/* ---------- machine view ---------- */
+.machine { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 14px; height: 100%; }
+.viewport { position: relative; min-height: 460px; overflow: hidden; }
+.viewport canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+.viewport canvas:active { cursor: grabbing; }
+.vp-overlay { position: absolute; display: flex; gap: 8px; align-items: center; pointer-events: none; }
+.vp-overlay > * { pointer-events: auto; }
+.vp-tl { top: 12px; left: 12px; flex-wrap: wrap; }
+.vp-br { bottom: 12px; right: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.vp-bl { bottom: 12px; left: 12px; font-size: 11px; color: var(--faint); }
+.state-badge {
+  font-weight: 800; letter-spacing: 1.2px; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--border-2); background: rgba(22, 25, 32, .85); color: var(--muted);
 }
-.tree-node summary::-webkit-details-marker { display: none; }
-.tree-node summary::before {
-  content: "▸ "; color: #9f927e; display: inline;
+.state-badge.cut { color: #fff; background: #c2410c; border-color: #f97316; box-shadow: 0 0 14px rgba(249, 115, 22, .45); }
+.state-badge.air { color: #bfe9cf; border-color: #2c6a47; }
+.src-badge { font-size: 12px; padding: 6px 10px; border-radius: 8px; background: rgba(22, 25, 32, .85); border: 1px solid var(--border); display: flex; gap: 7px; align-items: center; }
+.side-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; overflow-y: auto; padding-bottom: 2px; }
+.dro { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.dro div { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 8px 4px 7px; text-align: center; }
+.dro b { display: block; font-size: 12px; margin-bottom: 3px; }
+.dro span { font-family: var(--mono); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dro small { display: block; color: var(--faint); font-size: 10px; margin-top: 2px; }
+.force-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.force-big { font-family: var(--mono); font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.force-big small { font-size: 14px; color: var(--muted); font-weight: 600; margin-left: 4px; }
+.force-comp { display: flex; gap: 12px; font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+.force-comp span b { margin-right: 4px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.kpi { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 11px 8px; min-width: 0; }
+.kpi .kname { font-size: 11px; color: var(--muted); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kpi .kval { font-family: var(--mono); font-size: 20px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kpi canvas { width: 100%; height: 34px; display: block; margin-top: 4px; }
+.health { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 12px; }
+.health div { background: var(--bg); border: 1px solid var(--border); border-radius: 9px; padding: 7px 9px; }
+.health span { color: var(--muted); display: block; font-size: 11px; }
+.health b { font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; }
+.health b.bad { color: var(--bad); }
+
+/* ---------- settings ---------- */
+.modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 40; display: flex; justify-content: flex-end; }
+.modal-bg[hidden] { display: none; }
+.drawer { width: min(460px, 100%); height: 100%; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+.drawer-h { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); font-weight: 700; }
+.drawer-h .grow { flex: 1; }
+.drawer-b { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 18px; }
+.drawer-f { display: flex; gap: 10px; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--border); }
+.set-group h3 { font-size: 11px; letter-spacing: .8px; text-transform: uppercase; color: var(--faint); margin-bottom: 10px; }
+.set-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; align-items: center; margin-bottom: 8px; }
+.set-row label { font-size: 13px; color: var(--muted); }
+.set-row .note { grid-column: 2; font-size: 11.5px; color: var(--faint); margin-top: -4px; line-height: 1.45; }
+.signs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.signs select { width: 100%; padding: 7px 2px 7px 6px; font-size: 12px; }
+
+/* ---------- narrow screens: menu becomes a bottom bar ---------- */
+@media (max-width: 1100px) {
+  .machine { grid-template-columns: 1fr; height: auto; }
+  .viewport { min-height: 52vh; }
+  .side-col { overflow: visible; }
 }
-.tree-node details[open] > summary::before { content: "▾ "; }
-.tree-label { font-weight: 700; color: #4c4033; }
-.tree-summary { color: #9f927e; font-weight: 400; }
-.tree-value { color: #2a1d11; }
-.tree-leaf { margin-left: 14px; padding: 1px 0; }
-.tree-leaf:first-child { margin-left: 0; }
-.tree-string { color: #a0522d; }
-.tree-number { color: #1a6fb5; }
-.tree-boolean { color: #8b008b; }
-.tree-null { color: #9f927e; font-style: italic; }
+@media (max-width: 760px) {
+  :root { --side-w: 0px; --top-h: 52px; }
+  .brand .sub, .conn .addr { display: none; }
+  .side {
+    top: auto; bottom: 0; width: 100%; height: calc(58px + env(safe-area-inset-bottom)); flex-direction: row;
+    border-right: none; border-top: 1px solid var(--border); padding: 6px 10px env(safe-area-inset-bottom);
+  }
+  .side .group, .side-topics { display: none; }
+  .nav-btn { justify-content: center; }
+  .main { bottom: calc(58px + env(safe-area-inset-bottom)); }
+  .view { padding: 12px; }
+  .topic-grid { grid-template-columns: 1fr; }
+  .set-row { grid-template-columns: 1fr; }
+  .set-row .note { grid-column: 1; }
+  .brand > div { display: none; }
+  .dro { gap: 5px; }
+  .dro div { padding: 7px 2px 6px; }
+  .dro span { font-size: 13px; }
+  .force-big { font-size: 24px; }
+}
 </style>
 </head>
 <body>
 
-<div class="header">
-  <img src="/mads_logo_white.png" alt="MADS" />
-  <h1>Websocket bridge</h1>
-</div>
-
-<div class="tab-bar">
-  <button class="tab-btn active" data-tab="listen" onclick="switchTab('listen')">Listen</button>
-  <button class="tab-btn" data-tab="publish" onclick="switchTab('publish')">Publish</button>
-</div>
-
-<div class="content">
-
-  <!-- ═══════════ LISTEN PANEL ═══════════ -->
-  <div class="panel" id="panel-listen">
-    <div class="section-title">Latest messages</div>
-    <div class="section-body">
-      Update the topic list here. The browser reconnects listener sockets when you subscribe.
-    </div>
-    <div class="subscribe-row">
-      <div class="input-wrap">
-        <input type="text" id="topics-input" placeholder="_all or topic_a, topic_b" />
-      </div>
-      <button class="btn-primary" id="btn-subscribe" onclick="handleSubscribe()">Subscribe</button>
-    </div>
-    <div class="info-card">
-      <div class="info-card-label">Subscription set</div>
-      <div class="info-card-value" id="sub-set-value">_all</div>
-      <div class="info-card-hint" id="sub-set-hint">Waiting for bridge bootstrap.</div>
-    </div>
-    <div class="status-pill status-neutral" id="listen-status">
-      Choose topics and subscribe to start listening.
-    </div>
-    <div class="row">
-      <button class="btn-secondary" id="btn-expand" onclick="toggleExpandAll()">Expand all</button>
-      <button class="btn-secondary" onclick="clearMessages()">Clear</button>
-    </div>
-    <div id="messages-container">
-      <div class="empty-state" id="empty-state">
-        No messages captured yet. Subscribe and keep this tab open to receive updates.
-      </div>
+<header class="topbar">
+  <div class="brand">
+    <img src="/mads_logo_white.png" alt="MADS" onerror="this.style.display='none'" />
+    <div>
+      <div class="title">Huron U-Mill 5</div>
+      <div class="sub">Live monitor</div>
     </div>
   </div>
-
-  <!-- ═══════════ PUBLISH PANEL ═══════════ -->
-  <div class="panel" id="panel-publish" hidden>
-    <div class="section-title">Publisher</div>
-    <div class="status-pill status-neutral" id="publish-status">
-      Pick a topic to keep a publisher socket ready.
-    </div>
-    <div class="field">
-      <label class="field-label">Topic</label>
-      <input type="text" id="publish-topic" placeholder="topic_name" />
-    </div>
-    <div class="row">
-      <button class="btn-secondary" id="btn-history-toggle" onclick="toggleHistoryMenu()">Show past topics</button>
-      <button class="btn-secondary" onclick="clearHistory()">Clear history</button>
-    </div>
-    <div class="dropdown-menu" id="history-menu" hidden></div>
-    <div class="field">
-      <label class="field-label">JSON message</label>
-      <textarea id="publish-draft">{\n  \n}</textarea>
-    </div>
-    <div class="validation" id="validation-msg"></div>
-    <button class="btn-primary" id="btn-send" onclick="handleSend()" disabled>Send</button>
+  <div class="spacer"></div>
+  <div class="conn" id="conn" title="WebSocket connections to the MADS bridge">
+    <div class="dot pulse warn" id="conn-dot"></div>
+    <span id="conn-text">Connecting…</span>
+    <span class="addr" id="conn-addr"></span>
   </div>
+  <button class="icon-btn" id="btn-settings" title="Settings" aria-label="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
+</header>
 
+<nav class="side">
+  <button class="nav-btn active" data-view="telemetry">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 12 7 12 10 4 14 20 17 12 21 12"/></svg>
+    Telemetry
+  </button>
+  <button class="nav-btn" data-view="machine">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5"/><path d="M12 12v10"/></svg>
+    Machine
+  </button>
+  <div class="group">Topics</div>
+  <div class="side-topics" id="side-topics"></div>
+</nav>
+
+<main class="main">
+  <!-- ═════════════ TELEMETRY ═════════════ -->
+  <section class="view" id="view-telemetry">
+    <div class="banner" id="banner" hidden>
+      <div class="grow" id="banner-text"></div>
+      <button class="btn small" id="btn-retry">Retry</button>
+      <button class="btn small" id="btn-demo">Show demo data</button>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="grow">Subscribed topics</span></div>
+      <div class="card-b">
+        <div class="subscribe">
+          <input class="field-input" id="topics-input" spellcheck="false" placeholder="spi_agent, eekf_plugin, fmu_multibody_model" />
+          <button class="btn primary" id="btn-subscribe">Subscribe</button>
+        </div>
+        <div class="hint">Comma-separated MADS topics, one WebSocket each. <span class="mono">_all</span> receives everything but without the topic name. Hover a number in a message and press ◦ to plot it.</div>
+      </div>
+    </div>
+
+    <div class="card pinned" id="pinned-card" hidden>
+      <div class="card-h"><span class="grow">Pinned signals</span><button class="btn small" id="btn-unpin-all">Clear</button></div>
+      <div class="card-b" style="padding-bottom:8px"><div class="plot-box"><canvas id="pinned-plot"></canvas></div></div>
+      <div class="pin-chips" id="pin-chips"></div>
+    </div>
+
+    <div class="topic-grid" id="topic-grid"></div>
+  </section>
+
+  <!-- ═════════════ MACHINE ═════════════ -->
+  <section class="view" id="view-machine" hidden>
+    <div class="machine">
+      <div class="card viewport" id="viewport">
+        <canvas id="gl" title="Drag: orbit · right-drag or shift+drag: pan · wheel or pinch: zoom · double-click: reset"></canvas>
+        <div class="vp-overlay vp-tl">
+          <div class="state-badge" id="state-badge">NO DATA</div>
+          <div class="src-badge"><div class="dot idle" id="ekf-dot"></div><span id="ekf-src">EKF</span></div>
+        </div>
+        <div class="vp-overlay vp-br">
+          <button class="btn small" data-cam="iso">Iso</button>
+          <button class="btn small" data-cam="front">Front</button>
+          <button class="btn small" data-cam="side">Side</button>
+          <button class="btn small" data-cam="top">Top</button>
+          <button class="btn small on" id="btn-path">Tool path</button>
+          <button class="btn small" id="btn-clear-path">Clear path</button>
+        </div>
+      </div>
+
+      <div class="side-col">
+        <div class="card">
+          <div class="card-h"><span class="grow">Position</span><span class="mono" style="text-transform:none;letter-spacing:0" id="pos-path"></span></div>
+          <div class="card-b">
+            <div class="dro">
+              <div><b style="color:var(--ax-x)">X</b><span id="dro-x">—</span><small>mm</small></div>
+              <div><b style="color:var(--ax-y)">Y</b><span id="dro-y">—</span><small>mm</small></div>
+              <div><b style="color:var(--ax-z)">Z</b><span id="dro-z">—</span><small>mm</small></div>
+              <div><b style="color:var(--ax-a)">A</b><span id="dro-a">—</span><small>deg</small></div>
+              <div><b style="color:var(--ax-c)">C</b><span id="dro-c">—</span><small>deg</small></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><span class="grow">Cutting force</span></div>
+          <div class="card-b">
+            <div class="force-head">
+              <div class="force-big" id="force-norm">—<small>N</small></div>
+              <div class="force-comp">
+                <span><b style="color:var(--ax-x)">Fx</b><span id="fx">—</span></span>
+                <span><b style="color:var(--ax-y)">Fy</b><span id="fy">—</span></span>
+                <span><b style="color:var(--ax-z)">Fz</b><span id="fz">—</span></span>
+              </div>
+            </div>
+            <div class="plot-box" style="height:190px"><canvas id="force-plot"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><span class="grow">KPI</span><span class="mono" style="text-transform:none;letter-spacing:0" id="kpi-src"></span></div>
+          <div class="card-b">
+            <div class="kpi-grid" id="kpi-grid"></div>
+            <div class="empty" id="kpi-empty">Waiting for a message with a <span class="mono">"kpi"</span> object.<br>Every number inside it becomes a tile. Set its topic in Settings, or subscribe to it in Telemetry.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><span class="grow">Filter health</span></div>
+          <div class="card-b">
+            <div class="health">
+              <div><span>NIS</span><b id="h-nis">—</b></div>
+              <div><span>measurements</span><b id="h-meas">—</b></div>
+              <div><span>rejected updates</span><b id="h-rej">—</b></div>
+              <div><span>overruns</span><b id="h-over">—</b></div>
+              <div><span>timing gaps</span><b id="h-gaps">—</b></div>
+              <div><span>FMU rejections</span><b id="h-fmurej">—</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ═════════════ SETTINGS ═════════════ -->
+<div class="modal-bg" id="settings" hidden>
+  <div class="drawer" role="dialog" aria-label="Settings">
+    <div class="drawer-h"><span class="grow">Settings</span><button class="icon-btn" id="btn-close-settings" aria-label="Close">✕</button></div>
+    <div class="drawer-b">
+      <div class="set-group">
+        <h3>Machine view: sources</h3>
+        <div class="set-row"><label for="s-ekf-topic">EKF topic</label><input class="field-input" id="s-ekf-topic" spellcheck="false" /></div>
+        <div class="set-row"><label for="s-pos-path">Position field</label><input class="field-input" id="s-pos-path" spellcheck="false" />
+          <div class="note">5 values X Y Z [mm], A C [deg], as an array or as {x, y, z, a, c}. eekf_plugin publishes it as <span class="mono">eekf.position</span>.</div></div>
+        <div class="set-row"><label for="s-force-path">Force field</label><input class="field-input" id="s-force-path" spellcheck="false" /></div>
+        <div class="set-row"><label for="s-cut-path">Cutting flag</label><input class="field-input" id="s-cut-path" spellcheck="false" /></div>
+        <div class="set-row"><label for="s-health-path">Health object</label><input class="field-input" id="s-health-path" spellcheck="false" />
+          <div class="note">Object holding nis, measurements, rejected_updates, overruns, gaps, fmu_rejections.</div></div>
+        <div class="set-row"><label for="s-kpi-topic">KPI topic</label><input class="field-input" id="s-kpi-topic" spellcheck="false" placeholder="(any subscribed topic)" />
+          <div class="note">Empty: the KPI object is taken from any topic the page listens to.</div></div>
+        <div class="set-row"><label for="s-kpi-field">KPI field</label><input class="field-input" id="s-kpi-field" spellcheck="false" /></div>
+      </div>
+      <div class="set-group">
+        <h3>Machine view: model</h3>
+        <div class="set-row"><label>Axis directions</label>
+          <div class="signs" id="s-signs"></div>
+          <div class="note">X is −1 on the U-Mill 5: the table moves opposite to the programmed X. Flip an axis that moves the wrong way.</div></div>
+        <div class="set-row"><label for="s-tool-len">Tool length [mm]</label><input class="field-input" id="s-tool-len" type="number" step="1" /></div>
+        <div class="set-row"><label for="s-tool-dia">Tool diameter [mm]</label><input class="field-input" id="s-tool-dia" type="number" step="1" /></div>
+        <div class="set-row"><label for="s-tool-nose">Spindle nose [mm]</label><input class="field-input" id="s-tool-nose" type="number" step="1" />
+          <div class="note">Height of the spindle nose above the A axis at Z = 0. 260 and a 110 mm tool put the tip 150 mm above the axis, as in the MATLAB viewer and mt_plugin.</div></div>
+      </div>
+      <div class="set-group">
+        <h3>Plots</h3>
+        <div class="set-row"><label for="s-window">Time window [s]</label><input class="field-input" id="s-window" type="number" min="2" max="600" step="1" /></div>
+        <div class="set-row"><label for="s-rate">Telemetry refresh [Hz]</label><input class="field-input" id="s-rate" type="number" min="1" max="60" step="1" />
+          <div class="note">How often other topics are parsed and shown. The EKF and KPI topics are read at full rate.</div></div>
+      </div>
+    </div>
+    <div class="drawer-f">
+      <button class="btn" id="btn-reset-settings">Defaults</button>
+      <button class="btn primary" id="btn-save-settings">Apply</button>
+    </div>
+  </div>
 </div>
 
 <script>
 "use strict";
 
-// ── State ───────────────────────────────────────────────
-const STORAGE_KEY = "mads-websockets-client/state/v1";
+// ═════════════════════════════════════════════════════════════════════════════
+// Settings
+// ═════════════════════════════════════════════════════════════════════════════
+const STORE_KEY = "umill5-monitor/v1";
 const WS_PROTOCOL = "mads-websockets";
+const AXES = ["x", "y", "z", "a", "c"];
+const AXIS_COLORS = ["#ff5c6c", "#3ddc84", "#3d9bff", "#ffaa33", "#a68cff"];
+const SERIES_COLORS = ["#4c8dff", "#ff5c6c", "#3ddc84", "#ffaa33", "#a68cff", "#2dd4bf", "#f472b6", "#facc15"];
 
-let bootstrap = null;       // { scheme, port, path, addresses }
-let activeTab = "listen";
-let expandAll = false;
+const DEFAULTS = {
+  topics: ["spi_agent", "eekf_plugin"],
+  ekfTopic: "eekf_plugin",
+  posPath: "eekf.position",
+  forcePath: "eekf.force_n",
+  cutPath: "eekf.cutting",
+  healthPath: "eekf",
+  kpiTopic: "",
+  kpiField: "kpi",
+  signs: [-1, 1, 1, 1, 1],
+  toolLength: 110,
+  toolDiameter: 16,
+  toolNose: 260,
+  window: 20,
+  telemetryHz: 10,
+  pins: [],            // [{topic, path: [..]}]
+  view: "telemetry",
+};
 
-// Listen state
-let listenSockets = [];
-let listenMessages = {};    // topic -> last message
-let listenConfig = null;    // { baseAddress, path, topics }
+function loadSettings() {
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem(STORE_KEY) || "{}") || {}; } catch (_) { s = {}; }
+  return Object.assign(clone(DEFAULTS), s);
+}
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+function saveSettings() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(cfg)); } catch (_) { /* private mode */ }
+}
+let cfg = loadSettings();
 
-// Publish state
-let publishSocket = null;
-let publishHistory = [];
-
-// ── DOM refs ────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 
-// ── Persistence ─────────────────────────────────────────
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const s = JSON.parse(raw);
-    if (s.topics_input != null)    $("topics-input").value = s.topics_input;
-    if (s.publish_topic != null)   $("publish-topic").value = s.publish_topic;
-    if (s.publish_draft != null)   $("publish-draft").value = s.publish_draft;
-    if (Array.isArray(s.publish_history)) publishHistory = s.publish_history;
-  } catch (_) { /* ignore */ }
+// "eekf.force_n[0]" -> ["eekf", "force_n", 0]
+function parsePath(p) {
+  const out = [];
+  String(p || "").replace(/\[(\d+)\]|([^.[\]]+)/g, (_, idx, key) => { out.push(idx !== undefined ? Number(idx) : key); });
+  return out;
+}
+function pathStr(path) {
+  return path.map((k, i) => typeof k === "number" ? `[${k}]` : (i ? "." : "") + k).join("");
+}
+function getPath(obj, path) {
+  let v = obj;
+  for (const k of path) {
+    if (v === null || typeof v !== "object") return undefined;
+    v = v[k];
+  }
+  return v;
+}
+function vec(v, n, names) {
+  if (Array.isArray(v) && v.length >= n) return v.slice(0, n).map(Number);
+  if (v && typeof v === "object") {
+    const r = names.map((k) => Number(v[k] ?? v[k.toUpperCase()]));
+    if (r.every(Number.isFinite)) return r;
+  }
+  return null;
+}
+function fmt(v, d = 2) {
+  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+  const a = Math.abs(v);
+  if (a !== 0 && (a >= 1e6 || a < 1e-3)) return v.toExponential(2);
+  return v.toFixed(d);
+}
+function fmtAuto(v) {
+  if (typeof v !== "number" || !Number.isFinite(v)) return String(v);
+  const a = Math.abs(v);
+  if (a === 0) return "0";
+  if (Number.isInteger(v) && a < 1e15) return String(v);
+  if (a >= 1e5 || a < 1e-3) return v.toExponential(3);
+  if (a >= 100) return v.toFixed(1);
+  if (a >= 1) return v.toFixed(3);
+  return v.toFixed(4);
+}
+const nowS = () => performance.now() / 1000;
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Time-series plot on a canvas (no library). Per-pixel min/max, so it stays
+// fast with thousands of samples.
+// ═════════════════════════════════════════════════════════════════════════════
+class TimePlot {
+  constructor(canvas, opts = {}) {
+    this.c = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.series = [];
+    this.window = opts.window || 20;
+    this.unit = opts.unit || "";
+    this.compact = !!opts.compact;   // sparkline: no axes, no legend
+    this.minSpan = opts.minSpan || 1e-9;
+    this.maxPoints = opts.maxPoints || 6000;
+    this.legendValues = opts.legendValues !== false;
+    this.dirty = true;
+  }
+  setSeries(defs) {
+    this.series = defs.map((d, i) => ({ name: d.name, color: d.color || SERIES_COLORS[i % SERIES_COLORS.length], t: [], v: [], last: NaN }));
+    this.dirty = true;
+  }
+  push(i, t, v) {
+    const s = this.series[i];
+    if (!s || !Number.isFinite(v)) return;
+    const n = s.t.length;
+    // keep at most maxPoints over the window: skip samples closer than window/maxPoints
+    if (n && t - s.t[n - 1] < this.window / this.maxPoints) { s.v[n - 1] = v; s.last = v; this.dirty = true; return; }
+    s.t.push(t); s.v.push(v); s.last = v;
+    const t0 = t - this.window * 1.05;
+    let k = 0;
+    while (k < s.t.length && s.t[k] < t0) k++;
+    if (k > 512 || k > s.t.length / 2) { s.t.splice(0, k); s.v.splice(0, k); }
+    this.dirty = true;
+  }
+  clear() { for (const s of this.series) { s.t = []; s.v = []; s.last = NaN; } this.dirty = true; }
+  draw(now) {
+    const c = this.c, ctx = this.ctx;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = Math.max(1, Math.round(c.clientWidth * dpr)), H = Math.max(1, Math.round(c.clientHeight * dpr));
+    if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+    if (!c.clientWidth || !c.clientHeight) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = c.clientWidth, h = c.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    const t1 = now, t0 = now - this.window;
+    let lo = Infinity, hi = -Infinity;
+    for (const s of this.series) {
+      for (let i = 0; i < s.t.length; i++) {
+        if (s.t[i] < t0) continue;
+        const v = s.v[i];
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+    const empty = !(hi >= lo);
+    if (empty) { lo = -1; hi = 1; }
+    let span = hi - lo;
+    if (span < this.minSpan) { const m = (hi + lo) / 2; lo = m - this.minSpan / 2; hi = m + this.minSpan / 2; span = this.minSpan; }
+    lo -= span * 0.08; hi += span * 0.08;
+    const L = this.compact ? 2 : 52, R = this.compact ? 2 : 10, T = this.compact ? 3 : 24, B = this.compact ? 3 : 22;
+    const pw = w - L - R, ph = h - T - B;
+    const X = (t) => L + (t - t0) / (t1 - t0) * pw;
+    const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * ph;
+    ctx.font = PLOT_FONT;
+    if (!this.compact) {
+      // grid + y labels
+      const step = niceStep((hi - lo) / Math.max(2, Math.floor(ph / 38)));
+      ctx.strokeStyle = "#232834"; ctx.fillStyle = "#6c7586"; ctx.lineWidth = 1;
+      ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+        const y = Math.round(Y(v)) + 0.5;
+        ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+        ctx.fillText(fmtTick(v, step), L - 6, y);
+      }
+      // x labels: seconds ago
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      const xs = niceStep(this.window / 5);
+      for (let s = 0; s <= this.window + 1e-9; s += xs) {
+        const x = Math.round(X(t1 - s)) + 0.5;
+        ctx.strokeStyle = "#1d222c"; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke();
+        ctx.fillText(s === 0 ? "now" : `-${+s.toFixed(3)} s`, x, T + ph + 6);
+      }
+      if (lo < 0 && hi > 0) { ctx.strokeStyle = "#3a4152"; ctx.beginPath(); ctx.moveTo(L, Math.round(Y(0)) + 0.5); ctx.lineTo(L + pw, Math.round(Y(0)) + 0.5); ctx.stroke(); }
+    }
+    // series: per-pixel min/max
+    ctx.save();
+    ctx.beginPath(); ctx.rect(L, T - 1, pw, ph + 2); ctx.clip();
+    for (const s of this.series) {
+      ctx.strokeStyle = s.color; ctx.lineWidth = this.compact ? 1.4 : 1.6; ctx.lineJoin = "round";
+      ctx.beginPath();
+      let px = -1, mn = 0, mx = 0, first = true;
+      const flush = () => {
+        if (px < 0) return;
+        if (first) { ctx.moveTo(px, Y(mn)); first = false; } else ctx.lineTo(px, Y(mn));
+        if (mx !== mn) ctx.lineTo(px, Y(mx));
+      };
+      for (let i = 0; i < s.t.length; i++) {
+        if (s.t[i] < t0 - this.window * 0.02) continue;
+        const x = Math.round(X(s.t[i]));
+        const v = s.v[i];
+        if (x !== px) { flush(); px = x; mn = mx = v; }
+        else { if (v < mn) mn = v; if (v > mx) mx = v; }
+      }
+      flush();
+      ctx.stroke();
+    }
+    ctx.restore();
+    if (!this.compact) {
+      // legend with the latest values
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      let x = L;
+      for (const s of this.series) {
+        const label = this.legendValues ? `${s.name} ${Number.isFinite(s.last) ? fmtAuto(s.last) : "—"}` : s.name;
+        ctx.fillStyle = s.color; ctx.fillRect(x, 8, 10, 3);
+        ctx.fillStyle = "#c9cfda"; ctx.fillText(label, x + 14, 10);
+        x += ctx.measureText(label).width + 30;
+        if (x > w - 60) break;
+      }
+      if (this.unit) { ctx.textAlign = "right"; ctx.fillStyle = "#6c7586"; ctx.fillText(this.unit, w - R, 10); }
+      if (empty) { ctx.textAlign = "center"; ctx.fillStyle = "#5c6576"; ctx.fillText("no data", L + pw / 2, T + ph / 2); }
+    }
+    this.dirty = false;
+  }
+}
+const PLOT_FONT = '11px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+function niceStep(raw) {
+  if (!(raw > 0)) return 1;
+  const e = Math.pow(10, Math.floor(Math.log10(raw)));
+  const f = raw / e;
+  return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * e;
+}
+function fmtTick(v, step) {
+  const d = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+  const s = Math.abs(v) < step / 1e6 ? 0 : v;
+  return Math.abs(s) >= 1e5 ? s.toExponential(1) : s.toFixed(Math.min(d, 6));
 }
 
-function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      topics_input:    $("topics-input").value,
-      publish_topic:   $("publish-topic").value,
-      publish_draft:   $("publish-draft").value,
-      publish_history: publishHistory,
-    }));
-  } catch (_) { /* ignore */ }
+// ═════════════════════════════════════════════════════════════════════════════
+// Connections: one WebSocket per topic, reconnecting on its own
+// ═════════════════════════════════════════════════════════════════════════════
+const topics = new Map();   // topic -> state
+let bootstrap = null;
+let demo = null;
+
+function topicState(name) {
+  let s = topics.get(name);
+  if (!s) {
+    s = { name, ws: null, open: false, wanted: false, retry: 0, timer: null,
+          count: 0, rateCount: 0, hz: 0, lastRx: 0, raw: null, rawDirty: false,
+          lastParse: 0, latest: undefined, parseError: "" };
+    topics.set(name, s);
+  }
+  return s;
 }
 
-// ── Bootstrap ───────────────────────────────────────────
+// topics shown as cards in the Telemetry view
+function telemetryTopics() { return demo ? cfg.topics.concat(demo.extra || []) : cfg.topics.slice(); }
+
+function wantedTopics() {
+  const set = new Set(telemetryTopics());
+  if (cfg.ekfTopic) set.add(cfg.ekfTopic);
+  if (cfg.kpiTopic) set.add(cfg.kpiTopic);
+  for (const p of cfg.pins) set.add(p.topic);
+  return set;
+}
+
+function syncConnections() {
+  const want = wantedTopics();
+  for (const [name, s] of topics) {
+    if (!want.has(name)) {
+      s.wanted = false;
+      clearTimeout(s.timer);
+      if (s.ws) { try { s.ws.close(); } catch (_) {} }
+      topics.delete(name);
+      removeTopicCard(name);
+    }
+  }
+  for (const name of want) {
+    const s = topicState(name);
+    s.wanted = true;
+    if (!s.ws && !demo) openTopic(s);
+  }
+  renderSideTopics();
+  syncTopicCards();
+  updateConnBadge();
+}
+
+function wsUrl(topic) {
+  const host = window.location.hostname || "localhost";
+  const h = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  return `${bootstrap.scheme}://${h}:${bootstrap.port}${bootstrap.path}/${encodeURIComponent(topic)}`;
+}
+
+function openTopic(s) {
+  if (!bootstrap || !s.wanted) return;
+  let ws;
+  try { ws = new WebSocket(wsUrl(s.name), WS_PROTOCOL); } catch (e) { scheduleReconnect(s); return; }
+  s.ws = ws;
+  ws.onopen = () => { if (s.ws !== ws) return; s.open = true; s.retry = 0; updateConnBadge(); };
+  ws.onmessage = (ev) => { if (s.ws === ws) onRaw(s, ev.data); };
+  ws.onclose = () => {
+    if (s.ws !== ws) return;
+    s.open = false; s.ws = null; updateConnBadge();
+    scheduleReconnect(s);
+  };
+  ws.onerror = () => { /* onclose follows */ };
+}
+function scheduleReconnect(s) {
+  if (!s.wanted || demo) return;
+  clearTimeout(s.timer);
+  const delay = Math.min(5000, 500 * Math.pow(2, s.retry++));
+  s.timer = setTimeout(() => { if (s.wanted && !s.ws) openTopic(s); }, delay);
+}
+
 async function fetchBootstrap() {
   try {
-    const resp = await fetch(window.location.origin + "/bootstrap.json");
+    const resp = await fetch(window.location.origin + "/bootstrap.json", { cache: "no-store" });
     if (!resp.ok) throw new Error("HTTP " + resp.status);
-    const data = await resp.json();
-    if (typeof data.scheme !== "string" || typeof data.port !== "number" ||
-        typeof data.path !== "string" || !Array.isArray(data.addresses)) return;
-    const addresses = data.addresses.filter(a => typeof a === "string" && a.length > 0);
-    if (addresses.length === 0) return;
-    bootstrap = {
-      scheme: data.scheme,
-      port:   data.port,
-      path:   normalizePath(data.path),
-      addresses: addresses,
-    };
-    updateInfoCard();
-    updatePublishState();
-  } catch (e) {
-    console.warn("Failed to load bootstrap.json", e);
-  }
-}
-
-// ── Endpoint resolution ─────────────────────────────────
-function resolveEndpoint() {
-  if (!bootstrap) return null;
-  const host = window.location.hostname;
-  return {
-    baseAddress: bootstrap.scheme + "://" + host + ":" + bootstrap.port,
-    path: bootstrap.path,
-  };
-}
-
-function buildTopicUrl(baseAddress, path, topic) {
-  return baseAddress + normalizePath(path) + "/" + encodeURIComponent(topic);
-}
-
-function normalizePath(p) {
-  if (!p || p.trim().length === 0) return "/mads";
-  const prefixed = p.startsWith("/") ? p : "/" + p;
-  return prefixed.replace(/\/+$/, "") || "/mads";
-}
-
-// ── Tab switching ───────────────────────────────────────
-function switchTab(tab) {
-  activeTab = tab;
-  document.querySelectorAll(".tab-btn").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.tab === tab);
-  });
-  $("panel-listen").hidden  = (tab !== "listen");
-  $("panel-publish").hidden = (tab !== "publish");
-
-  if (tab === "listen" && listenConfig) {
-    // Re-subscribe when coming back to listen tab
-    openListenSockets();
-  }
-  if (tab !== "listen") {
-    closeListenSockets();
-  }
-}
-
-// ── Listen ──────────────────────────────────────────────
-function parseTopics(input) {
-  const items = input.split(",").map(s => s.trim()).filter((v, i, a) => v.length > 0 && a.indexOf(v) === i);
-  if (items.length === 0 || items.includes("_all")) return ["_all"];
-  return items;
-}
-
-function handleSubscribe() {
-  const endpoint = resolveEndpoint();
-  if (!endpoint) {
-    setListenStatus("Waiting for bridge bootstrap before subscribing.", "warning");
-    return;
-  }
-  const topics = parseTopics($("topics-input").value);
-  listenConfig = { baseAddress: endpoint.baseAddress, path: endpoint.path, topics: topics };
-  $("sub-set-value").textContent = topics.join(", ");
-  updateInfoCard();
-  openListenSockets();
-  saveState();
-}
-
-function openListenSockets() {
-  closeListenSockets();
-  if (!listenConfig) return;
-  if (activeTab !== "listen") return;
-
-  setListenStatus("Connecting to " + listenConfig.topics.join(", ") + "...", "neutral");
-  let opened = 0;
-  const cfg = listenConfig;
-
-  listenSockets = cfg.topics.map(topic => {
-    const url = buildTopicUrl(cfg.baseAddress, cfg.path, topic);
-    const ws = new WebSocket(url, WS_PROTOCOL);
-
-    ws.onopen = () => {
-      opened++;
-      setListenStatus("Listening on " + opened + "/" + cfg.topics.length + " connection(s).", "success");
-    };
-    ws.onmessage = (ev) => {
-      try {
-        const parsed = JSON.parse(ev.data);
-        const msg = normalizeIncoming(topic, parsed);
-        listenMessages[msg.topic] = msg.message;
-        renderMessages();
-      } catch (e) {
-        setListenStatus("Received invalid JSON on " + topic + ": " + e.message, "danger");
-      }
-    };
-    ws.onerror = () => {
-      setListenStatus("Listener connection failed for topic " + topic + ".", "danger");
-    };
-    ws.onclose = () => {
-      if (activeTab === "listen") {
-        setListenStatus("Listener for " + topic + " closed.", "warning");
-      }
-    };
-    return ws;
-  });
-}
-
-function closeListenSockets() {
-  for (const ws of listenSockets) { try { ws.close(); } catch (_) {} }
-  listenSockets = [];
-}
-
-function normalizeIncoming(topic, message) {
-  if (topic === "_all" && message && typeof message === "object" &&
-      typeof message.topic === "string" && "message" in message) {
-    return { topic: message.topic, message: message.message };
-  }
-  return { topic, message };
-}
-
-function setListenStatus(text, tone) {
-  const el = $("listen-status");
-  el.textContent = text;
-  el.className = "status-pill status-" + tone;
-}
-
-function updateInfoCard() {
-  const endpoint = resolveEndpoint();
-  const topics = parseTopics($("topics-input").value);
-  $("sub-set-value").textContent = topics.join(", ");
-  $("sub-set-hint").textContent = endpoint
-    ? endpoint.baseAddress + endpoint.path
-    : "Waiting for bridge bootstrap.";
-}
-
-function toggleExpandAll() {
-  expandAll = !expandAll;
-  $("btn-expand").textContent = expandAll ? "Collapse all" : "Expand all";
-  renderMessages();
-}
-
-function clearMessages() {
-  listenMessages = {};
-  renderMessages();
-}
-
-function renderMessages() {
-  const container = $("messages-container");
-  const keys = Object.keys(listenMessages).sort();
-
-  if (keys.length === 0) {
-    container.innerHTML = '<div class="empty-state" id="empty-state">' +
-      'No messages captured yet. Subscribe and keep this tab open to receive updates.</div>';
-    return;
-  }
-
-  // Build a map of existing cards by topic for in-place updates
-  const existingCards = {};
-  for (const card of Array.from(container.querySelectorAll(".message-card"))) {
-    const topic = card.dataset.topic;
-    if (topic) existingCards[topic] = card;
-  }
-
-  // Remove cards for topics no longer present
-  for (const topic of Object.keys(existingCards)) {
-    if (!(topic in listenMessages)) {
-      existingCards[topic].remove();
-      delete existingCards[topic];
-    }
-  }
-
-  // Remove empty-state placeholder if present
-  const empty = container.querySelector(".empty-state");
-  if (empty) empty.remove();
-
-  // Update or insert cards in sorted order
-  let prevCard = null;
-  for (const topic of keys) {
-    let card = existingCards[topic];
-    if (card) {
-      // Collect open state of all <details> by path before replacing content
-      const treeRoot = card.querySelector(".tree-node");
-      const openPaths = collectOpenPaths(treeRoot);
-      const tree = document.createElement("div");
-      tree.className = "tree-node";
-      tree.appendChild(buildTree(topic, listenMessages[topic], expandAll));
-      restoreOpenPaths(tree, openPaths);
-      treeRoot.replaceWith(tree);
-    } else {
-      card = document.createElement("div");
-      card.className = "message-card";
-      card.dataset.topic = topic;
-      const tree = document.createElement("div");
-      tree.className = "tree-node";
-      tree.appendChild(buildTree(topic, listenMessages[topic], expandAll));
-      card.appendChild(tree);
-      // Insert in sorted position
-      if (prevCard && prevCard.nextSibling) {
-        container.insertBefore(card, prevCard.nextSibling);
-      } else if (!prevCard) {
-        container.prepend(card);
-      } else {
-        container.appendChild(card);
-      }
-    }
-    prevCard = card;
-  }
-}
-
-// Collect the open/closed state of every <details> as a set of index-paths
-function collectOpenPaths(root) {
-  const open = new Set();
-  (function walk(el, path) {
-    const children = el.querySelectorAll(":scope > details");
-    children.forEach((d, i) => {
-      const p = path + "/" + i;
-      if (d.open) open.add(p);
-      walk(d, p);
-    });
-  })(root, "");
-  return open;
-}
-
-// Restore open state from collected paths
-function restoreOpenPaths(root, openPaths) {
-  (function walk(el, path) {
-    const children = el.querySelectorAll(":scope > details");
-    children.forEach((d, i) => {
-      const p = path + "/" + i;
-      d.open = openPaths.has(p);
-      walk(d, p);
-    });
-  })(root, "");
-}
-
-function buildTree(label, value, open) {
-  if (value === null || value === undefined || typeof value !== "object") {
-    const div = document.createElement("div");
-    div.className = "tree-leaf";
-    div.innerHTML = '<span class="tree-label">' + esc(label) + ': </span>' + formatScalar(value);
-    return div;
-  }
-
-  const details = document.createElement("details");
-  if (open) details.open = true;
-  const summary = document.createElement("summary");
-  summary.innerHTML = '<span class="tree-label">' + esc(label) + '</span>' +
-    '<span class="tree-summary">' + summarize(value) + '</span>';
-  details.appendChild(summary);
-
-  const entries = Array.isArray(value)
-    ? value.map((v, i) => ["[" + i + "]", v])
-    : Object.entries(value);
-  for (const [k, v] of entries) {
-    details.appendChild(buildTree(k, v, open));
-  }
-  return details;
-}
-
-function formatScalar(v) {
-  if (v === null || v === undefined) return '<span class="tree-null">' + String(v) + '</span>';
-  if (typeof v === "string") return '<span class="tree-string">"' + esc(v) + '"</span>';
-  if (typeof v === "number") return '<span class="tree-number">' + v + '</span>';
-  if (typeof v === "boolean") return '<span class="tree-boolean">' + v + '</span>';
-  return '<span class="tree-value">' + esc(JSON.stringify(v)) + '</span>';
-}
-
-function summarize(v) {
-  if (Array.isArray(v)) return " [" + v.length + "]";
-  if (v && typeof v === "object") return " {" + Object.keys(v).length + "}";
-  return "";
-}
-
-function esc(s) {
-  const d = document.createElement("div");
-  d.textContent = String(s);
-  return d.innerHTML;
-}
-
-// ── Publish ─────────────────────────────────────────────
-let publishTopicDebounce = null;
-
-function setupPublishListeners() {
-  $("publish-topic").addEventListener("input", () => {
-    clearTimeout(publishTopicDebounce);
-    publishTopicDebounce = setTimeout(() => {
-      reconnectPublisher();
-      saveState();
-    }, 400);
-  });
-
-  $("publish-draft").addEventListener("input", () => {
-    validateDraft();
-    saveState();
-  });
-}
-
-function validateDraft() {
-  const raw = $("publish-draft").value.trim();
-  const msgEl = $("validation-msg");
-  if (raw.length === 0) {
-    msgEl.textContent = "Enter a JSON payload.";
-    msgEl.className = "validation validation-err";
-    updateSendButton();
-    return false;
-  }
-  try {
-    JSON.parse(raw);
-    msgEl.textContent = "Valid JSON payload.";
-    msgEl.className = "validation validation-ok";
-    updateSendButton();
+    const d = await resp.json();
+    if (typeof d.scheme !== "string" || typeof d.port !== "number" || typeof d.path !== "string") throw new Error("bad bootstrap");
+    bootstrap = { scheme: d.scheme, port: d.port, path: normPath(d.path) };
+    $("conn-addr").textContent = `${window.location.hostname}:${d.port}`;
+    $("banner").hidden = true;
     return true;
   } catch (e) {
-    msgEl.textContent = e.message;
-    msgEl.className = "validation validation-err";
-    updateSendButton();
+    bootstrap = null;
+    $("banner-text").textContent = "The MADS bridge is not reachable (no bootstrap.json). Start it with mads-websockets -w, then retry.";
+    $("banner").hidden = false;
+    updateConnBadge();
     return false;
   }
 }
-
-function updateSendButton() {
-  const topic = $("publish-topic").value.trim();
-  const jsonOk = $("validation-msg").classList.contains("validation-ok");
-  const socketReady = publishSocket && publishSocket.readyState === WebSocket.OPEN;
-  $("btn-send").disabled = !(jsonOk && topic.length > 0 && socketReady);
+function normPath(p) {
+  if (!p || !p.trim()) return "/mads";
+  const q = p.startsWith("/") ? p : "/" + p;
+  return q.replace(/\/+$/, "") || "/mads";
 }
 
-function updatePublishState() {
-  reconnectPublisher();
+function updateConnBadge() {
+  const dot = $("conn-dot"), text = $("conn-text");
+  const list = [...topics.values()];
+  const open = list.filter((s) => s.open).length;
+  dot.className = "dot";
+  if (demo) { dot.classList.add("warn"); text.textContent = `Demo data · ${list.length} topics`; return; }
+  if (!bootstrap) { dot.classList.add("bad"); text.textContent = "Bridge unreachable"; return; }
+  if (list.length === 0) { dot.classList.add("idle"); text.textContent = "No topics"; return; }
+  if (open === list.length) { dot.classList.add("ok"); text.textContent = `Connected · ${open}/${list.length}`; }
+  else if (open > 0) { dot.classList.add("warn"); text.textContent = `Connected · ${open}/${list.length}`; }
+  else { dot.classList.add("warn", "pulse"); text.textContent = "Connecting…"; }
 }
 
-function reconnectPublisher() {
-  closePublishSocket();
-  const endpoint = resolveEndpoint();
-  const topic = $("publish-topic").value.trim();
+// ═════════════════════════════════════════════════════════════════════════════
+// Incoming data
+// ═════════════════════════════════════════════════════════════════════════════
+function isFastTopic(name) {
+  return name === cfg.ekfTopic || name === cfg.kpiTopic;
+}
 
-  if (!endpoint) {
-    setPublishStatus("Waiting for bridge bootstrap to enable publishing.", "warning");
-    updateSendButton();
-    return;
+function onRaw(s, raw) {
+  const t = nowS();
+  s.count++; s.rateCount++; s.lastRx = t;
+  // Machine topics: every message (the force plot and the tool path want them all).
+  // Other topics: keep the newest, parse it at the telemetry refresh rate.
+  if (isFastTopic(s.name)) parseTopic(s, raw, t);
+  else { s.raw = raw; s.rawDirty = true; }
+}
+
+function parseTopic(s, raw, t) {
+  let msg;
+  try { msg = JSON.parse(raw); s.parseError = ""; }
+  catch (e) { s.parseError = e.message; return; }
+  s.latest = msg; s.lastParse = t; s.treeDirty = true;
+  handleMessage(s.name, msg, t);
+}
+
+function handleMessage(topic, msg, t) {
+  if (topic === cfg.ekfTopic) machine.onEkf(msg, t);
+  if (!cfg.kpiTopic || topic === cfg.kpiTopic) {
+    const k = msg && typeof msg === "object" ? msg[cfg.kpiField] : undefined;
+    if (k !== undefined) kpi.onKpi(topic, k, t);
   }
-  if (topic.length === 0) {
-    setPublishStatus("Pick a topic to keep a publisher socket ready.", "neutral");
-    updateSendButton();
-    return;
-  }
-
-  setPublishStatus("Connecting publisher to " + topic + "...", "neutral");
-  const url = buildTopicUrl(endpoint.baseAddress, endpoint.path, topic);
-  const ws = new WebSocket(url, WS_PROTOCOL);
-  publishSocket = ws;
-
-  ws.onopen = () => {
-    if (publishSocket !== ws) return;
-    setPublishStatus("Publisher ready on " + topic + ".", "success");
-    updateSendButton();
-  };
-  ws.onerror = () => {
-    if (publishSocket !== ws) return;
-    setPublishStatus("Publisher connection failed for " + topic + ".", "danger");
-    updateSendButton();
-  };
-  ws.onclose = () => {
-    if (publishSocket !== ws) return;
-    setPublishStatus("Publisher disconnected for " + topic + ".", "warning");
-    updateSendButton();
-  };
+  pins.onMessage(topic, msg, t);
 }
 
-function closePublishSocket() {
-  if (publishSocket) { try { publishSocket.close(); } catch (_) {} }
-  publishSocket = null;
-}
-
-function handleSend() {
-  if (!publishSocket || publishSocket.readyState !== WebSocket.OPEN) return;
-  if (!validateDraft()) return;
-
-  const topic = $("publish-topic").value.trim();
-  publishSocket.send($("publish-draft").value.trim());
-
-  // Update history
-  publishHistory = [topic, ...publishHistory.filter(t => t !== topic)].slice(0, 12);
-  saveState();
-
-  setPublishStatus("Sent message on " + topic + ".", "success");
-}
-
-function setPublishStatus(text, tone) {
-  const el = $("publish-status");
-  el.textContent = text;
-  el.className = "status-pill status-" + tone;
-}
-
-function toggleHistoryMenu() {
-  const menu = $("history-menu");
-  const btn = $("btn-history-toggle");
-  if (menu.hidden) {
-    renderHistoryMenu();
-    menu.hidden = false;
-    btn.textContent = "Hide past topics";
-  } else {
-    menu.hidden = true;
-    btn.textContent = "Show past topics";
-  }
-}
-
-function renderHistoryMenu() {
-  const menu = $("history-menu");
-  menu.innerHTML = "";
-  if (publishHistory.length === 0) {
-    menu.hidden = true;
-    $("btn-history-toggle").textContent = "Show past topics";
-    return;
-  }
-  for (const topic of publishHistory) {
-    const item = document.createElement("div");
-    item.className = "dropdown-item";
-    item.textContent = topic;
-    item.addEventListener("click", () => {
-      $("publish-topic").value = topic;
-      $("history-menu").hidden = true;
-      $("btn-history-toggle").textContent = "Show past topics";
-      reconnectPublisher();
-      saveState();
-    });
-    menu.appendChild(item);
-  }
-}
-
-function clearHistory() {
-  publishHistory = [];
-  $("history-menu").innerHTML = "";
-  $("history-menu").hidden = true;
-  $("btn-history-toggle").textContent = "Show past topics";
-  saveState();
-}
-
-// ── Init ────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
-  // Fixup the textarea default value (literal \n in HTML)
-  $("publish-draft").value = "{\n  \n}";
-
-  loadState();
-  setupPublishListeners();
-  validateDraft();
-  updateInfoCard();
-  fetchBootstrap().then(() => {
-    // Auto-subscribe if we have a config from last session
-    const topics = parseTopics($("topics-input").value);
-    const endpoint = resolveEndpoint();
-    if (endpoint) {
-      listenConfig = { baseAddress: endpoint.baseAddress, path: endpoint.path, topics: topics };
-      $("sub-set-value").textContent = topics.join(", ");
-      openListenSockets();
+// slow topics, at the telemetry refresh rate
+setInterval(() => {
+  const t = nowS();
+  for (const s of topics.values()) {
+    if (s.rawDirty && t - s.lastParse >= 1 / Math.max(1, cfg.telemetryHz) - 1e-3) {
+      s.rawDirty = false;
+      parseTopic(s, s.raw, t);
     }
-  });
-});
+  }
+}, 20);
 
-// Save on input changes for topic field
-$("topics-input")?.addEventListener("input", () => {
-  updateInfoCard();
-  saveState();
+// message rates, once a second
+setInterval(() => {
+  for (const s of topics.values()) { s.hz = s.hz ? 0.5 * s.hz + 0.5 * s.rateCount : s.rateCount; s.rateCount = 0; }
+  renderSideTopics();
+}, 1000);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Telemetry view: live JSON trees, built lazily and updated in place
+// ═════════════════════════════════════════════════════════════════════════════
+const cards = new Map(); // topic -> {el, tree, statsEl, metaEl, dot}
+
+function syncTopicCards() {
+  const grid = $("topic-grid");
+  const want = telemetryTopics();
+  if (want.length === 0 && !grid.querySelector(".empty")) {
+    grid.innerHTML = '<div class="card empty">No topics subscribed. Type them above and press Subscribe.</div>';
+  }
+  if (want.length) { const e = grid.querySelector(":scope > .empty"); if (e) e.remove(); }
+  for (const name of [...cards.keys()]) if (!want.includes(name)) removeTopicCard(name);
+  for (const name of want) {
+    if (cards.has(name)) continue;
+    const el = document.createElement("div");
+    el.className = "card topic-card";
+    el.innerHTML = `<div class="card-h"><div class="dot idle"></div><span class="tname"></span><span class="grow"></span><span class="stats"></span>
+      <button class="btn small" data-act="expand">Expand</button></div>
+      <div class="meta"></div><div class="tree-wrap"><div class="tree"></div></div>`;
+    el.querySelector(".tname").textContent = name;
+    const treeEl = el.querySelector(".tree");
+    const card = { el, dot: el.querySelector(".dot"), statsEl: el.querySelector(".stats"), metaEl: el.querySelector(".meta"),
+                   tree: new JsonTree(treeEl, name), empty: true };
+    treeEl.innerHTML = '<div class="empty">Waiting for messages…</div>';
+    el.querySelector('[data-act="expand"]').addEventListener("click", (ev) => {
+      const b = ev.currentTarget; const open = b.textContent === "Expand";
+      card.tree.setAll(open); b.textContent = open ? "Collapse" : "Expand";
+    });
+    cards.set(name, card);
+    grid.appendChild(el);
+  }
+  // keep the subscription order
+  for (const name of want) grid.appendChild(cards.get(name).el);
+}
+function removeTopicCard(name) {
+  const c = cards.get(name);
+  if (c) { c.el.remove(); cards.delete(name); }
+}
+
+class JsonTree {
+  constructor(root, topic) { this.root = root; this.topic = topic; this.node = null; }
+  update(value) {
+    if (!this.node || this.node.kind !== kindOf(value)) {
+      this.root.innerHTML = "";
+      this.node = this.build(null, value, [], true);
+      this.root.appendChild(this.node.el);
+    } else {
+      this.patch(this.node, value);
+    }
+  }
+  setAll(open) {
+    const walk = (n) => {
+      if (n.kind === "leaf") return;
+      if (n.details) { n.details.open = open; if (open) this.ensureKids(n); }
+      if (n.kids) for (const k of n.kids.values()) walk(k);
+    };
+    if (this.node) { walk(this.node); if (this.node.details) this.node.details.open = true; }
+  }
+  build(key, value, path, isRoot = false) {
+    const kind = kindOf(value);
+    if (kind === "leaf") {
+      const el = document.createElement("div");
+      el.className = "leaf";
+      const k = document.createElement("span"); k.className = "k"; k.textContent = key === null ? "value" : String(key) + ":";
+      const v = document.createElement("span"); v.className = "v";
+      el.append(k, v);
+      const n = { kind, el, v, path, value: undefined, pin: null };
+      if (typeof value === "number") n.pin = this.addPin(el, path);
+      this.setLeaf(n, value);
+      return n;
+    }
+    // object / array
+    const n = { kind, path, value, kids: null, details: null, sum: null, kidsEl: null };
+    if (isRoot) {
+      const el = document.createElement("div");
+      n.el = el; n.kidsEl = el;
+      n.kids = new Map(); this.fillKids(n, value);
+      return n;
+    }
+    const d = document.createElement("details");
+    const s = document.createElement("summary");
+    const k = document.createElement("span"); k.className = "k"; k.textContent = String(key);
+    const sum = document.createElement("span"); sum.className = "sum";
+    s.append(k, sum); d.appendChild(s);
+    n.el = d; n.details = d; n.sum = sum;
+    sum.textContent = summarize(value);
+    d.addEventListener("toggle", () => { if (d.open) { this.ensureKids(n); this.patch(n, n.value); } });
+    return n;
+  }
+  ensureKids(n) {
+    if (n.kids) return;
+    n.kidsEl = document.createElement("div"); n.kidsEl.className = "kids";
+    n.details.appendChild(n.kidsEl);
+    n.kids = new Map(); this.fillKids(n, n.value);
+  }
+  fillKids(n, value) {
+    for (const [k, v] of entries(value)) {
+      const child = this.build(k, v, n.path.concat([Array.isArray(value) ? Number(k) : k]));
+      n.kids.set(String(k), child); n.kidsEl.appendChild(child.el);
+    }
+  }
+  patch(n, value) {
+    if (n.kind === "leaf") { this.setLeaf(n, value); return; }
+    n.value = value;
+    if (n.sum) n.sum.textContent = summarize(value);
+    if (!n.kids || (n.details && !n.details.open)) return;   // collapsed: nothing else to do
+    const seen = new Set();
+    for (const [k, v] of entries(value)) {
+      const key = String(k); seen.add(key);
+      let child = n.kids.get(key);
+      if (child && child.kind !== kindOf(v)) { child.el.remove(); n.kids.delete(key); child = null; }
+      if (!child) {
+        child = this.build(k, v, n.path.concat([Array.isArray(value) ? Number(k) : k]));
+        n.kids.set(key, child); n.kidsEl.appendChild(child.el);
+      } else this.patch(child, v);
+    }
+    for (const [key, child] of n.kids) if (!seen.has(key)) { child.el.remove(); n.kids.delete(key); }
+  }
+  setLeaf(n, value) {
+    if (n.value === value) return;
+    n.value = value;
+    const t = value === null || value === undefined ? "nul" : typeof value === "number" ? "num" : typeof value === "boolean" ? "bool" : "str";
+    n.v.className = "v " + t;
+    n.v.textContent = t === "str" ? JSON.stringify(value) : t === "num" ? fmtAuto(value) : String(value);
+    if (t === "num") n.v.title = String(value);
+    if (t === "num" && !n.pin) n.pin = this.addPin(n.el, n.path);
+  }
+  addPin(el, path) {
+    const b = document.createElement("button");
+    b.className = "pin"; b.textContent = "◦"; b.title = "Plot this value";
+    const id = pinId(this.topic, path);
+    if (pins.has(id)) { b.classList.add("on"); b.textContent = "●"; }
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); pins.toggle(this.topic, path); });
+    b.dataset.pin = id;
+    el.appendChild(b);
+    return b;
+  }
+}
+function kindOf(v) { return v !== null && typeof v === "object" ? (Array.isArray(v) ? "array" : "object") : "leaf"; }
+function entries(v) { return Array.isArray(v) ? v.map((x, i) => [i, x]) : Object.entries(v); }
+function summarize(v) {
+  if (Array.isArray(v)) {
+    if (v.length > 0 && v.length <= 6 && v.every((x) => typeof x === "number")) return "[" + v.map(fmtAuto).join(", ") + "]";
+    if (v.length > 6 && v.every((x) => typeof x === "number")) {
+      let lo = Infinity, hi = -Infinity; for (const x of v) { if (x < lo) lo = x; if (x > hi) hi = x; }
+      return `[${v.length}]  ${fmtAuto(lo)} … ${fmtAuto(hi)}`;
+    }
+    if (v.length > 0 && Array.isArray(v[0])) return `[${v.length}×${v[0].length}]`;
+    return `[${v.length}]`;
+  }
+  return `{${Object.keys(v).length}}`;
+}
+
+function renderTelemetry() {
+  const t = nowS();
+  for (const [name, card] of cards) {
+    const s = topics.get(name);
+    if (!s) continue;
+    const age = s.lastRx ? t - s.lastRx : Infinity;
+    card.dot.className = "dot " + (demo || s.open ? (age < 2 ? "ok" : "warn") : "bad");
+    card.statsEl.textContent = s.count ? `${s.hz.toFixed(0)} Hz · ${age < 1 ? "now" : age.toFixed(0) + " s ago"}` : (s.open || demo ? "no messages" : "closed");
+    card.statsEl.title = `${s.count} messages received`;
+    if (s.treeDirty && s.latest !== undefined) {
+      s.treeDirty = false;
+      card.tree.update(s.latest);
+      const m = s.latest && typeof s.latest === "object" ? s.latest : {};
+      const meta = [m.hostname, m.agent_id].filter((x) => typeof x === "string").join(" · ");
+      const tc = typeof m.timecode === "number" ? `timecode ${m.timecode.toFixed(3)}` : "";
+      card.metaEl.textContent = [meta, tc, s.parseError && "invalid JSON: " + s.parseError].filter(Boolean).join("   ") || " ";
+    }
+  }
+}
+
+function renderSideTopics() {
+  const box = $("side-topics");
+  const t = nowS();
+  const list = [...topics.values()];
+  if (box.childElementCount !== list.length) {
+    box.innerHTML = "";
+    for (const s of list) {
+      const row = document.createElement("div");
+      row.className = "side-topic";
+      row.innerHTML = '<div class="dot idle"></div><span class="name"></span><span class="hz"></span>';
+      row.querySelector(".name").textContent = s.name; row.title = s.name;
+      box.appendChild(row);
+    }
+  }
+  list.forEach((s, i) => {
+    const row = box.children[i];
+    const age = s.lastRx ? t - s.lastRx : Infinity;
+    row.querySelector(".name").textContent = s.name;
+    row.querySelector(".dot").className = "dot " + (demo || s.open ? (age < 2 ? "ok" : "warn") : "bad");
+    row.querySelector(".hz").textContent = s.count ? `${s.hz.toFixed(0)} Hz` : "";
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Pinned signals
+// ═════════════════════════════════════════════════════════════════════════════
+function pinId(topic, path) { return topic + "\u0000" + JSON.stringify(path); }
+const pins = {
+  plot: null,
+  has(id) { return cfg.pins.some((p) => pinId(p.topic, p.path) === id); },
+  toggle(topic, path) {
+    const id = pinId(topic, path);
+    const i = cfg.pins.findIndex((p) => pinId(p.topic, p.path) === id);
+    if (i >= 0) cfg.pins.splice(i, 1);
+    else { if (cfg.pins.length >= 8) cfg.pins.shift(); cfg.pins.push({ topic, path }); }
+    saveSettings(); this.rebuild();
+  },
+  rebuild() {
+    if (!this.plot) this.plot = new TimePlot($("pinned-plot"), { window: cfg.window });
+    this.plot.window = cfg.window;
+    this.plot.setSeries(cfg.pins.map((p) => ({ name: `${p.topic}:${pathStr(p.path)}` })));
+    $("pinned-card").hidden = cfg.pins.length === 0;
+    const chips = $("pin-chips"); chips.innerHTML = "";
+    cfg.pins.forEach((p, i) => {
+      const c = document.createElement("span"); c.className = "chip";
+      c.innerHTML = `<i style="background:${this.plot.series[i].color}"></i><span></span><button title="Remove">×</button>`;
+      c.querySelector("span").textContent = `${p.topic}:${pathStr(p.path)}`;
+      c.querySelector("button").addEventListener("click", () => this.toggle(p.topic, p.path));
+      chips.appendChild(c);
+    });
+    document.querySelectorAll(".tree .pin").forEach((b) => {
+      const on = this.has(b.dataset.pin); b.classList.toggle("on", on); b.textContent = on ? "●" : "◦";
+    });
+    syncConnections();
+  },
+  onMessage(topic, msg, t) {
+    if (!this.plot) return;
+    cfg.pins.forEach((p, i) => {
+      if (p.topic !== topic) return;
+      const v = getPath(msg, p.path);
+      if (typeof v === "number") this.plot.push(i, t, v);
+    });
+  },
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// KPI tiles: every number under the "kpi" object, with a sparkline
+// ═════════════════════════════════════════════════════════════════════════════
+const kpi = {
+  tiles: new Map(), source: "",
+  onKpi(topic, obj, t) {
+    this.source = topic;
+    const flat = [];
+    const walk = (v, prefix) => {
+      if (v !== null && typeof v === "object" && !Array.isArray(v)) for (const [k, x] of Object.entries(v)) walk(x, prefix ? prefix + "." + k : k);
+      else flat.push([prefix || cfg.kpiField, v]);
+    };
+    walk(obj, "");
+    for (const [name, v] of flat) {
+      let tile = this.tiles.get(name);
+      if (!tile) tile = this.addTile(name);
+      if (typeof v === "number") { tile.val.textContent = fmtAuto(v); tile.plot.push(0, t, v); }
+      else tile.val.textContent = Array.isArray(v) ? `[${v.map((x) => typeof x === "number" ? fmtAuto(x) : x).join(", ")}]` : String(v);
+    }
+  },
+  addTile(name) {
+    $("kpi-empty").hidden = true;
+    const el = document.createElement("div"); el.className = "kpi";
+    el.innerHTML = '<div class="kname"></div><div class="kval">—</div><canvas></canvas>';
+    el.querySelector(".kname").textContent = name.replace(/_/g, " ");
+    el.title = name;
+    $("kpi-grid").appendChild(el);
+    const plot = new TimePlot(el.querySelector("canvas"), { window: Math.max(60, cfg.window * 6), compact: true, maxPoints: 600 });
+    const i = this.tiles.size;
+    plot.setSeries([{ name, color: SERIES_COLORS[(i + 2) % SERIES_COLORS.length] }]);
+    const tile = { el, val: el.querySelector(".kval"), plot };
+    this.tiles.set(name, tile);
+    return tile;
+  },
+  reset() { this.tiles.clear(); $("kpi-grid").innerHTML = ""; $("kpi-empty").hidden = false; },
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Minimal WebGL renderer for the machine (no library)
+// ═════════════════════════════════════════════════════════════════════════════
+const M4 = {
+  ident() { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; },
+  // column-major, like WebGL
+  mul(a, b) {
+    const o = new Array(16);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+    }
+    return o;
+  },
+  trans(x, y, z) { const m = M4.ident(); m[12] = x; m[13] = y; m[14] = z; return m; },
+  rotX(r) { const c = Math.cos(r), s = Math.sin(r); return [1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 0, 0, 0, 1]; },
+  rotZ(r) { const c = Math.cos(r), s = Math.sin(r); return [c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; },
+  persp(fovy, aspect, n, f) {
+    const t = 1 / Math.tan(fovy / 2);
+    return [t / aspect, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) / (n - f), -1, 0, 0, 2 * f * n / (n - f), 0];
+  },
+  lookAt(e, c, u) {
+    let z = [e[0] - c[0], e[1] - c[1], e[2] - c[2]]; z = norm3(z);
+    let x = norm3(cross3(u, z)); const y = cross3(z, x);
+    return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
+      -dot3(x, e), -dot3(y, e), -dot3(z, e), 1];
+  },
+  // inverse of a rigid transform (rotation + translation)
+  rigidInv(m) {
+    const r = [m[0], m[4], m[8], 0, m[1], m[5], m[9], 0, m[2], m[6], m[10], 0, 0, 0, 0, 1];
+    const t = [m[12], m[13], m[14]];
+    r[12] = -(r[0] * t[0] + r[4] * t[1] + r[8] * t[2]);
+    r[13] = -(r[1] * t[0] + r[5] * t[1] + r[9] * t[2]);
+    r[14] = -(r[2] * t[0] + r[6] * t[1] + r[10] * t[2]);
+    return r;
+  },
+  apply(m, p) { return [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]]; },
+  normal3(m) { return [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]]; },
+};
+function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function norm3(a) { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+
+// Mesh builder: the same parts as mt_plugin/scripts/make_umill5_models.py and
+// machine-model/machine_viewer.m (mm, machine frame at zero, origin on the A axis)
+class MeshBuilder {
+  constructor() { this.p = []; this.n = []; this.c = []; }
+  tri(a, b, c, na, nb, nc, col) {
+    this.p.push(...a, ...b, ...c); this.n.push(...na, ...nb, ...nc);
+    for (let i = 0; i < 3; i++) this.c.push(...col);
+  }
+  quad(a, b, c, d, n, col) { this.tri(a, b, c, n, n, n, col); this.tri(a, c, d, n, n, n, col); }
+  box(lo, hi, col) {
+    const [x0, y0, z0] = lo, [x1, y1, z1] = hi;
+    this.quad([x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [0, 0, -1], col);
+    this.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], col);
+    this.quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [0, -1, 0], col);
+    this.quad([x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [0, 1, 0], col);
+    this.quad([x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [-1, 0, 0], col);
+    this.quad([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1], [1, 0, 0], col);
+  }
+  // closed cylinder along "z" (centre x=y=0) or "x" (centre y=z=0), from s0 to s1
+  cyl(r, s0, s1, col, axis = "z", n = 48) {
+    const P = axis === "z" ? (s, a, b) => [a, b, s] : (s, a, b) => [s, a, b];
+    const N = axis === "z" ? (a, b, s) => [a, b, s] : (a, b, s) => [s, a, b];
+    for (let k = 0; k < n; k++) {
+      const t0 = 2 * Math.PI * k / n, t1 = 2 * Math.PI * (k + 1) / n;
+      const c0 = r * Math.cos(t0), d0 = r * Math.sin(t0), c1 = r * Math.cos(t1), d1 = r * Math.sin(t1);
+      const n0 = N(Math.cos(t0), Math.sin(t0), 0), n1 = N(Math.cos(t1), Math.sin(t1), 0);
+      this.tri(P(s0, c0, d0), P(s0, c1, d1), P(s1, c1, d1), n0, n1, n1, col);
+      this.tri(P(s0, c0, d0), P(s1, c1, d1), P(s1, c0, d0), n0, n1, n0, col);
+      this.tri(P(s1, 0, 0), P(s1, c0, d0), P(s1, c1, d1), N(0, 0, 1), N(0, 0, 1), N(0, 0, 1), col);
+      this.tri(P(s0, 0, 0), P(s0, c1, d1), P(s0, c0, d0), N(0, 0, -1), N(0, 0, -1), N(0, 0, -1), col);
+    }
+  }
+}
+
+const COL = {
+  grey: [0.55, 0.57, 0.60], dark: [0.30, 0.32, 0.35], blue: [0.27, 0.45, 0.68], orange: [0.90, 0.55, 0.20],
+  green: [0.35, 0.60, 0.45], part: [0.55, 0.75, 0.95], slot: [0.15, 0.15, 0.15], red: [0.85, 0.10, 0.10], tool: [0.80, 0.81, 0.85],
+};
+function buildParts() {
+  const P = {};
+  let m = new MeshBuilder();
+  m.box([-950, -520, -620], [950, 520, -470], COL.grey);
+  m.box([180, -880, -620], [380, -700, 950], COL.grey);
+  m.box([180, 700, -620], [380, 880, 950], COL.grey);
+  m.box([180, -880, 950], [380, 880, 1050], COL.grey);
+  P.ground = m;
+  m = new MeshBuilder();
+  m.box([-480, -360, -470], [480, 360, -410], COL.blue);
+  m.box([-470, -130, -410], [-380, 130, 60], COL.blue);
+  m.box([380, -130, -410], [470, 130, 60], COL.blue);
+  m.cyl(70, -500, -375, COL.dark, "x");
+  m.cyl(70, 375, 500, COL.dark, "x");
+  P.x = m;
+  m = new MeshBuilder();
+  m.box([-300, -290, -160], [300, 290, -100], COL.orange);
+  m.box([-375, -110, -160], [-300, 110, 50], COL.orange);
+  m.box([300, -110, -160], [375, 110, 50], COL.orange);
+  P.a = m;
+  m = new MeshBuilder();
+  m.cyl(250, -100, -30, COL.dark, "z");
+  for (const s of [-150, -50, 50, 150]) {
+    const h = Math.sqrt(250 * 250 - (Math.abs(s) + 6) ** 2) - 5;
+    m.box([-h, s - 6, -30], [h, s + 6, -28.5], COL.slot);
+  }
+  m.box([225, -12, -30], [250, 12, -27], COL.red);
+  m.box([-60, -40, -28.5], [60, 40, 30], COL.part);
+  P.c = m;
+  m = new MeshBuilder();
+  m.box([100, -170, 520], [180, 170, 1000], COL.green);
+  P.y = m;
+  m = new MeshBuilder();
+  m.box([-95, -95, 410], [100, 95, 1050], COL.green);
+  m.cyl(70, 260, 410, COL.dark, "z");
+  P.z = m;
+  return P;
+}
+
+class MachineScene {
+  constructor(canvas) {
+    this.canvas = canvas;
+    const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
+    this.gl = gl;
+    if (!gl) return;
+    this.pos = [0, 0, 0, 0, 0];
+    this.cam = { yaw: -2.25, pitch: 0.40, dist: 4300, target: [0, 0, 160] };
+    this.homeCam = { ...this.cam, target: [...this.cam.target] };
+    this.showPath = true;
+    this.pathN = 0; this.pathCap = 20000; this.pathData = new Float32Array(this.pathCap * 3); this.pathDirty = false;
+    this.lastPathPt = null;
+    this.initGL();
+    this.parts = {};
+    const P = buildParts();
+    for (const k of Object.keys(P)) this.parts[k] = this.upload(P[k]);
+    this.setTool(cfg.toolLength, cfg.toolDiameter, cfg.toolNose);
+    this.grid = this.uploadLines(gridLines());
+    this.pathBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.pathBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, this.pathData.byteLength, gl.DYNAMIC_DRAW);
+    this.controls();
+    this.dirty = true;
+  }
+  initGL() {
+    const gl = this.gl;
+    const vs = `attribute vec3 aP; attribute vec3 aN; attribute vec3 aC;
+      uniform mat4 uVP; uniform mat4 uM; uniform mat3 uNm;
+      varying vec3 vN; varying vec3 vC; varying vec3 vW;
+      void main(){ vec4 w = uM * vec4(aP, 1.0); vW = w.xyz; vN = uNm * aN; vC = aC; gl_Position = uVP * w; }`;
+    const fs = `precision mediump float;
+      varying vec3 vN; varying vec3 vC; varying vec3 vW;
+      uniform vec3 uL1; uniform vec3 uL2; uniform vec3 uEye;
+      void main(){
+        vec3 n = normalize(vN);
+        if (dot(n, uEye - vW) < 0.0) n = -n;
+        float d = 0.62 * max(dot(n, uL1), 0.0) + 0.22 * max(dot(n, uL2), 0.0);
+        float sky = 0.5 + 0.5 * n.z;
+        vec3 c = vC * (0.28 + 0.12 * sky + d);
+        gl_FragColor = vec4(pow(c, vec3(0.95)), 1.0);
+      }`;
+    this.prog = linkProgram(gl, vs, fs);
+    const lvs = `attribute vec3 aP; uniform mat4 uVP; uniform mat4 uM; void main(){ gl_Position = uVP * uM * vec4(aP, 1.0); }`;
+    const lfs = `precision mediump float; uniform vec4 uCol; void main(){ gl_FragColor = uCol; }`;
+    this.lprog = linkProgram(gl, lvs, lfs);
+    this.loc = {}; for (const n of ["aP", "aN", "aC"]) this.loc[n] = gl.getAttribLocation(this.prog, n);
+    for (const n of ["uVP", "uM", "uNm", "uL1", "uL2", "uEye"]) this.loc[n] = gl.getUniformLocation(this.prog, n);
+    this.lloc = { aP: gl.getAttribLocation(this.lprog, "aP"), uVP: gl.getUniformLocation(this.lprog, "uVP"),
+                  uM: gl.getUniformLocation(this.lprog, "uM"), uCol: gl.getUniformLocation(this.lprog, "uCol") };
+    gl.enable(gl.DEPTH_TEST);
+  }
+  upload(mb) {
+    const gl = this.gl;
+    const mk = (arr) => { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STATIC_DRAW); return b; };
+    return { p: mk(mb.p), n: mk(mb.n), c: mk(mb.c), count: mb.p.length / 3 };
+  }
+  uploadLines(arr) {
+    const gl = this.gl, b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STATIC_DRAW);
+    return { b, count: arr.length / 3 };
+  }
+  setTool(len, dia, nose) {
+    if (!this.gl) return;
+    this.tool = { len: +len || 110, dia: +dia || 16, nose: +nose || 260 };
+    const m = new MeshBuilder();
+    m.cyl(this.tool.dia / 2, this.tool.nose - this.tool.len, this.tool.nose, COL.tool, "z", 24);
+    this.parts.tool = this.upload(m);
+    this.clearPath();
+  }
+  setPosition(p) { this.pos = p; this.dirty = true; this.addPathPoint(); }
+  transforms() {
+    const s = cfg.signs, p = this.pos, r = Math.PI / 180;
+    const T = {};
+    T.ground = M4.ident();
+    T.x = M4.trans(s[0] * p[0], 0, 0);
+    T.a = M4.mul(T.x, M4.rotX(s[3] * p[3] * r));
+    T.c = M4.mul(T.a, M4.rotZ(s[4] * p[4] * r));
+    T.y = M4.trans(0, s[1] * p[1], 0);
+    T.z = M4.mul(T.y, M4.trans(0, 0, s[2] * p[2]));
+    T.tool = T.z;
+    return T;
+  }
+  addPathPoint() {
+    if (!this.tool) return;
+    const T = this.transforms();
+    const tip = M4.apply(M4.mul(M4.rigidInv(T.c), T.z), [0, 0, this.tool.nose - this.tool.len]);
+    const l = this.lastPathPt;
+    if (l && Math.hypot(tip[0] - l[0], tip[1] - l[1], tip[2] - l[2]) < 0.05) return;
+    if (this.pathN >= this.pathCap) {
+      const keep = this.pathCap / 2;
+      this.pathData.copyWithin(0, (this.pathN - keep) * 3, this.pathN * 3);
+      this.pathN = keep;
+    }
+    this.pathData.set(tip, this.pathN * 3); this.pathN++;
+    this.lastPathPt = tip; this.pathDirty = true;
+  }
+  clearPath() { this.pathN = 0; this.lastPathPt = null; this.pathDirty = true; this.dirty = true; }
+  view(name) {
+    const v = { iso: [-2.25, 0.42], front: [-Math.PI / 2, 0.06], side: [Math.PI, 0.06], top: [-Math.PI / 2, 1.5] }[name];
+    if (!v) return;
+    this.cam.yaw = v[0]; this.cam.pitch = v[1]; this.cam.dist = this.homeCam.dist; this.cam.target = [...this.homeCam.target];
+    this.dirty = true;
+  }
+  eye() {
+    const c = this.cam;
+    return [c.target[0] + c.dist * Math.cos(c.pitch) * Math.cos(c.yaw), c.target[1] + c.dist * Math.cos(c.pitch) * Math.sin(c.yaw), c.target[2] + c.dist * Math.sin(c.pitch)];
+  }
+  controls() {
+    const cv = this.canvas, ptrs = new Map();
+    let mode = null, last = null, pinch = 0;
+    cv.addEventListener("contextmenu", (e) => e.preventDefault());
+    cv.addEventListener("pointerdown", (e) => {
+      cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+      mode = e.button === 2 || e.shiftKey ? "pan" : "orbit"; last = [e.clientX, e.clientY];
+      if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); mode = "pinch"; }
+    });
+    cv.addEventListener("pointermove", (e) => {
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+      if (mode === "pinch" && ptrs.size === 2) {
+        const [a, b] = [...ptrs.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        if (pinch > 0) this.zoom(pinch / d); pinch = d; return;
+      }
+      const dx = e.clientX - last[0], dy = e.clientY - last[1]; last = [e.clientX, e.clientY];
+      if (mode === "orbit") {
+        this.cam.yaw -= dx * 0.008;
+        this.cam.pitch = Math.max(-0.2, Math.min(1.55, this.cam.pitch + dy * 0.006));
+      } else if (mode === "pan") {
+        const e3 = this.eye(), f = norm3([this.cam.target[0] - e3[0], this.cam.target[1] - e3[1], this.cam.target[2] - e3[2]]);
+        const rgt = norm3(cross3(f, [0, 0, 1])), up = cross3(rgt, f), k = this.cam.dist * 0.0011;
+        for (let i = 0; i < 3; i++) this.cam.target[i] += (-dx * rgt[i] + dy * up[i]) * k;
+      }
+      this.dirty = true;
+    });
+    const end = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = 0; if (ptrs.size === 0) mode = null; };
+    cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
+    cv.addEventListener("wheel", (e) => { e.preventDefault(); this.zoom(Math.exp(e.deltaY * 0.0012)); }, { passive: false });
+    cv.addEventListener("dblclick", () => { this.cam = { ...this.homeCam, target: [...this.homeCam.target] }; this.dirty = true; });
+  }
+  zoom(f) { this.cam.dist = Math.max(400, Math.min(12000, this.cam.dist * f)); this.dirty = true; }
+  render() {
+    const gl = this.gl;
+    if (!gl) return;
+    const cv = this.canvas, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = Math.max(1, Math.round(cv.clientWidth * dpr)), H = Math.max(1, Math.round(cv.clientHeight * dpr));
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; this.dirty = true; }
+    if (!this.dirty && !this.pathDirty) return;
+    gl.viewport(0, 0, W, H);
+    gl.clearColor(0.075, 0.085, 0.105, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    const eye = this.eye();
+    const VP = M4.mul(M4.persp(0.62, W / H, 20, 40000), M4.lookAt(eye, this.cam.target, [0, 0, 1]));
+    const toEye = norm3([eye[0] - this.cam.target[0], eye[1] - this.cam.target[1], eye[2] - this.cam.target[2]]);
+    const L1 = norm3([toEye[0] + 0.25, toEye[1] - 0.2, toEye[2] + 0.9]);
+    const L2 = norm3([-toEye[0], -toEye[1], 0.35]);
+    const T = this.transforms();
+    // solids
+    gl.useProgram(this.prog);
+    gl.uniformMatrix4fv(this.loc.uVP, false, VP);
+    gl.uniform3fv(this.loc.uL1, L1); gl.uniform3fv(this.loc.uL2, L2); gl.uniform3fv(this.loc.uEye, eye);
+    for (const k of ["ground", "x", "a", "c", "y", "z", "tool"]) {
+      const p = this.parts[k];
+      gl.uniformMatrix4fv(this.loc.uM, false, T[k]);
+      gl.uniformMatrix3fv(this.loc.uNm, false, M4.normal3(T[k]));
+      bindAttr(gl, p.p, this.loc.aP); bindAttr(gl, p.n, this.loc.aN); bindAttr(gl, p.c, this.loc.aC);
+      gl.drawArrays(gl.TRIANGLES, 0, p.count);
+    }
+    gl.disableVertexAttribArray(this.loc.aN); gl.disableVertexAttribArray(this.loc.aC);
+    // lines: floor grid and tool path (in the frame of the rotary table)
+    gl.useProgram(this.lprog);
+    gl.uniformMatrix4fv(this.lloc.uVP, false, VP);
+    gl.uniformMatrix4fv(this.lloc.uM, false, M4.ident());
+    gl.uniform4fv(this.lloc.uCol, [0.22, 0.25, 0.31, 1]);
+    bindAttr(gl, this.grid.b, this.lloc.aP);
+    gl.drawArrays(gl.LINES, 0, this.grid.count);
+    if (this.showPath && this.pathN > 1) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.pathBuf);
+      if (this.pathDirty) gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.pathData.subarray(0, this.pathN * 3));
+      gl.uniformMatrix4fv(this.lloc.uM, false, T.c);
+      gl.uniform4fv(this.lloc.uCol, [1.0, 0.25, 0.2, 1]);
+      gl.disable(gl.DEPTH_TEST);   // keep the path visible over the part
+      bindAttr(gl, this.pathBuf, this.lloc.aP);
+      gl.drawArrays(gl.LINE_STRIP, 0, this.pathN);
+      gl.enable(gl.DEPTH_TEST);
+    }
+    this.pathDirty = false; this.dirty = false;
+  }
+}
+function bindAttr(gl, buf, loc) {
+  if (loc < 0) return;
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+}
+function linkProgram(gl, vsrc, fsrc) {
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, vsrc)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fsrc)); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+function gridLines() {
+  const a = [], z = -621, ext = 2400, st = 200;
+  for (let v = -ext; v <= ext; v += st) { a.push(-ext, v, z, ext, v, z, v, -ext, z, v, ext, z); }
+  return a;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Machine view
+// ═════════════════════════════════════════════════════════════════════════════
+const machine = {
+  scene: null, force: null, lastEkf: 0, lastPos: 0, cutting: null,
+  init() {
+    try { this.scene = new MachineScene($("gl")); } catch (e) { console.error(e); }
+    if (!this.scene || !this.scene.gl) {
+      $("viewport").insertAdjacentHTML("beforeend", '<div class="empty" style="position:absolute;inset:40% 0 auto">WebGL is not available in this browser: the 3-D model cannot be drawn.</div>');
+    }
+    this.force = new TimePlot($("force-plot"), { window: cfg.window, unit: "N", minSpan: 10, legendValues: false });
+    this.force.setSeries([{ name: "Fx", color: AXIS_COLORS[0] }, { name: "Fy", color: AXIS_COLORS[1] }, { name: "Fz", color: AXIS_COLORS[2] }, { name: "|F|", color: "#e6e8ec" }]);
+    document.querySelectorAll("[data-cam]").forEach((b) => b.addEventListener("click", () => this.scene && this.scene.view(b.dataset.cam)));
+    $("btn-path").addEventListener("click", (e) => {
+      if (!this.scene) return; this.scene.showPath = !this.scene.showPath; e.currentTarget.classList.toggle("on", this.scene.showPath); this.scene.dirty = true;
+    });
+    $("btn-clear-path").addEventListener("click", () => this.scene && this.scene.clearPath());
+    this.applySettings();
+  },
+  applySettings() {
+    $("pos-path").textContent = `${cfg.ekfTopic} · ${cfg.posPath}`;
+    $("kpi-src").textContent = cfg.kpiTopic ? `${cfg.kpiTopic} · ${cfg.kpiField}` : `any topic · ${cfg.kpiField}`;
+    this.force.window = cfg.window; this.force.dirty = true;
+    if (this.scene && this.scene.gl) { this.scene.setTool(cfg.toolLength, cfg.toolDiameter, cfg.toolNose); this.scene.dirty = true; }
+  },
+  // Called for every EKF message (up to ~1 kHz): only data here, the DOM is
+  // written once per animation frame in renderStatus().
+  onEkf(msg, t) {
+    this.lastEkf = t;
+    const p = vec(getPath(msg, parsePath(cfg.posPath)), 5, AXES);
+    if (p) {
+      this.lastPos = t; this.p = p;
+      if (this.scene) this.scene.setPosition(p);
+    }
+    const f = vec(getPath(msg, parsePath(cfg.forcePath)), 3, ["x", "y", "z"]);
+    if (f) {
+      const n = Math.hypot(f[0], f[1], f[2]);
+      this.force.push(0, t, f[0]); this.force.push(1, t, f[1]); this.force.push(2, t, f[2]); this.force.push(3, t, n);
+      this.f = f;
+    }
+    const c = getPath(msg, parsePath(cfg.cutPath));
+    if (typeof c === "boolean") this.cutting = c;
+    const h = getPath(msg, parsePath(cfg.healthPath));
+    if (h && typeof h === "object") this.h = h;
+    this.fresh = true;
+  },
+  renderValues() {
+    if (!this.fresh) return;
+    this.fresh = false;
+    if (this.p) AXES.forEach((a, i) => { $("dro-" + a).textContent = fmt(this.p[i], 3); });
+    if (this.f) {
+      const f = this.f;
+      $("force-norm").innerHTML = `${fmt(Math.hypot(f[0], f[1], f[2]), 1)}<small>N</small>`;
+      $("fx").textContent = fmt(f[0], 1); $("fy").textContent = fmt(f[1], 1); $("fz").textContent = fmt(f[2], 1);
+    }
+    const h = this.h;
+    if (h) {
+      const set = (id, v, bad) => { const el = $(id); el.textContent = typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : "—"; el.classList.toggle("bad", !!bad); };
+      set("h-nis", h.nis); set("h-meas", h.measurements);
+      set("h-rej", h.rejected_updates, h.rejected_updates > 0); set("h-over", h.overruns, h.overruns > 0);
+      set("h-gaps", h.gaps, h.gaps > 0); set("h-fmurej", h.fmu_rejections, h.fmu_rejections > 0);
+    }
+  },
+  renderStatus() {
+    this.renderValues();
+    const t = nowS(), s = topics.get(cfg.ekfTopic);
+    const age = this.lastEkf ? t - this.lastEkf : Infinity;
+    const dot = $("ekf-dot"), src = $("ekf-src"), badge = $("state-badge");
+    const live = age < 2;
+    dot.className = "dot " + (live ? "ok" : s && (s.open || demo) ? "warn" : "bad");
+    if (live && !this.lastPos) src.textContent = `${cfg.ekfTopic}: no ${cfg.posPath}`;
+    else src.textContent = live ? `${cfg.ekfTopic} · ${s ? s.hz.toFixed(0) : 0} Hz` : `${cfg.ekfTopic}: ${s && (s.open || demo) ? "silent" : "not connected"}`;
+    if (!live || this.cutting === null) { badge.className = "state-badge"; badge.textContent = live ? "—" : "NO DATA"; }
+    else if (this.cutting) { badge.className = "state-badge cut"; badge.textContent = "CUTTING"; }
+    else { badge.className = "state-badge air"; badge.textContent = "IN AIR"; }
+  },
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Demo data: same path as the bridge, generated in the page (?demo, or the
+// button in the banner). Square + circle in XY, A tilts, C turns, cuts on X.
+// ═════════════════════════════════════════════════════════════════════════════
+function startDemo() {
+  if (demo) return;
+  for (const s of topics.values()) { s.wanted = false; clearTimeout(s.timer); if (s.ws) try { s.ws.close(); } catch (_) {} s.ws = null; }
+  demo = { t0: nowS(), timers: [] };
+  $("banner-text").textContent = "Showing generated demo data, not the machine. Reload the page to connect to the bridge.";
+  $("btn-demo").hidden = true; $("btn-retry").textContent = "Connect"; $("banner").hidden = false;
+  const kpiTopic = cfg.kpiTopic || "energy_kpi";
+  demo.extra = cfg.topics.includes(kpiTopic) ? [] : [kpiTopic];
+  syncConnections();
+  const send = (topic, obj) => { const s = topics.get(topic); if (s) onRaw(s, JSON.stringify(obj)); };
+  let tus = 0, energy = 0;
+  const pose = (t) => {
+    const T = 24, u = (t % T) / T;                // 24 s cycle
+    let x, y;
+    if (u < 0.5) {                                  // square 120 x 80 mm
+      const q = u / 0.5 * 4, side = Math.min(3, Math.floor(q)), f = q - side;
+      const sx = [f, 1, 1 - f, 0][side], sy = [0, f, 1, 1 - f][side];
+      x = -60 + 120 * sx; y = -40 + 80 * sy;
+    } else {                                        // circle r = 50
+      const th = (u - 0.5) / 0.5 * 2 * Math.PI;   // starts and ends at the square's corner
+      x = -10 - 50 * Math.cos(th); y = -40 - 50 * Math.sin(th);
+    }
+    const a = -25 * (0.5 - 0.5 * Math.cos(2 * Math.PI * t / 48));
+    const c = (t * 6) % 360;
+    const z = -110 + 6 * Math.sin(2 * Math.PI * t / 12);
+    return [x, y, z, a, c];
+  };
+  demo.timers.push(setInterval(() => {               // EKF at 200 Hz (the real one runs at ~1 kHz)
+    const t = nowS() - demo.t0;
+    for (let k = 0; k < 4; k++) {
+      const tt = t + k * 0.00125;
+      const p = pose(tt), cut = (tt % 24) < 12;
+      const F = cut ? [140 + 25 * Math.sin(tt * 9.1) + 12 * Math.random(), -70 + 18 * Math.sin(tt * 5.3) + 8 * Math.random(), 55 + 10 * Math.sin(tt * 3.7) + 5 * Math.random()]
+                    : [2 * Math.random() - 1, 2 * Math.random() - 1, 2 * Math.random() - 1];
+      tus += 1024;
+      send(cfg.ekfTopic, { fmu_dt: 0.001024, fmu_input: { torque_in: [0.4, -0.2, 1.1, 0, 0] },
+        eekf: { t_us: tus, force_n: F, force_norm_n: Math.hypot(...F), force_std_n: [2.1, 2.1, 19.3], position: p,
+                bias_nm: [0.01, -0.02, 0.0, 0, 0], cutting: cut, measurements: cut ? 3 : 6, nis: 2.5 + Math.random() * 2,
+                rejected_updates: 0, air_rejections: 9, overruns: 0, gaps: 0, fmu_rejections: 0 },
+        hostname: "raspberrypi", timecode: tt });
+    }
+  }, 20));
+  demo.timers.push(setInterval(() => {               // SPI agent, 100 Hz here
+    const t = nowS() - demo.t0, cut = (t % 24) < 12;
+    send("spi_agent", { t_us: Math.round(t * 1e6), torque_nm: [0.8 + 0.1 * Math.sin(t * 7), 0.5, 2.1, 0.2, 0.1, cut ? 3.2 : 0.2],
+      fe_hz: [12.5, -8.2, 3.1, 0, 0, 200], imu: { clamp: [0.01, -0.02, 1.0], spindle: [0.02 * Math.sin(t * 40), 0.01, 1.0] },
+      hostname: "raspberrypi", timecode: t });
+  }, 10));
+  demo.timers.push(setInterval(() => {               // KPI, 1 Hz
+    const t = nowS() - demo.t0, cut = (t % 24) < 12;
+    const Pin = 3200 + (cut ? 900 : 0) + 120 * Math.random(), Pcut = cut ? 620 + 60 * Math.random() : 0;
+    energy += Pin / 3600 / 1000;
+    send(kpiTopic, { kpi: { efficiency: Pcut / Pin, cutting_power_w: Pcut, mains_power_w: Pin, specific_energy_j_mm3: cut ? 4.2 + 0.4 * Math.random() : 0, energy_kwh: energy, state: cut ? "cutting" : "air" },
+      hostname: "raspberrypi", timecode: t });
+  }, 1000));
+  for (const name of cfg.topics) if (!["spi_agent", cfg.ekfTopic, kpiTopic].includes(name)) {
+    const s = topics.get(name); if (s) s.open = true;
+  }
+  updateConnBadge();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Views, settings, init
+// ═════════════════════════════════════════════════════════════════════════════
+function showView(v) {
+  cfg.view = v; saveSettings();
+  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
+  $("view-telemetry").hidden = v !== "telemetry";
+  $("view-machine").hidden = v !== "machine";
+  if (machine.scene) machine.scene.dirty = true;
+  for (const s of topics.values()) s.treeDirty = s.latest !== undefined;
+}
+
+function parseTopicList(text) {
+  return text.split(/[,\s]+/).map((s) => s.trim()).filter((v, i, a) => v && a.indexOf(v) === i);
+}
+
+function openSettings() {
+  $("s-ekf-topic").value = cfg.ekfTopic; $("s-pos-path").value = cfg.posPath; $("s-force-path").value = cfg.forcePath;
+  $("s-cut-path").value = cfg.cutPath; $("s-health-path").value = cfg.healthPath;
+  $("s-kpi-topic").value = cfg.kpiTopic; $("s-kpi-field").value = cfg.kpiField;
+  $("s-tool-len").value = cfg.toolLength; $("s-tool-dia").value = cfg.toolDiameter; $("s-tool-nose").value = cfg.toolNose;
+  $("s-window").value = cfg.window; $("s-rate").value = cfg.telemetryHz;
+  const signs = $("s-signs"); signs.innerHTML = "";
+  AXES.forEach((a, i) => {
+    const sel = document.createElement("select"); sel.className = "field-input"; sel.dataset.i = i;
+    sel.innerHTML = `<option value="1">${a.toUpperCase()} +</option><option value="-1">${a.toUpperCase()} −</option>`;
+    sel.value = String(cfg.signs[i]); signs.appendChild(sel);
+  });
+  $("settings").hidden = false;
+}
+function applySettingsForm() {
+  const num = (id, d, lo, hi) => { const v = Number($(id).value); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
+  const oldKpi = cfg.kpiTopic + "|" + cfg.kpiField;
+  cfg.ekfTopic = $("s-ekf-topic").value.trim() || DEFAULTS.ekfTopic;
+  cfg.posPath = $("s-pos-path").value.trim() || DEFAULTS.posPath;
+  cfg.forcePath = $("s-force-path").value.trim() || DEFAULTS.forcePath;
+  cfg.cutPath = $("s-cut-path").value.trim() || DEFAULTS.cutPath;
+  cfg.healthPath = $("s-health-path").value.trim() || DEFAULTS.healthPath;
+  cfg.kpiTopic = $("s-kpi-topic").value.trim();
+  cfg.kpiField = $("s-kpi-field").value.trim() || DEFAULTS.kpiField;
+  cfg.toolLength = num("s-tool-len", DEFAULTS.toolLength, 1, 1000);
+  cfg.toolDiameter = num("s-tool-dia", DEFAULTS.toolDiameter, 0.5, 200);
+  cfg.toolNose = num("s-tool-nose", DEFAULTS.toolNose, -2000, 2000);
+  cfg.window = num("s-window", DEFAULTS.window, 2, 600);
+  cfg.telemetryHz = num("s-rate", DEFAULTS.telemetryHz, 1, 60);
+  cfg.signs = [...$("s-signs").querySelectorAll("select")].map((s) => Number(s.value) < 0 ? -1 : 1);
+  saveSettings();
+  if (oldKpi !== cfg.kpiTopic + "|" + cfg.kpiField) kpi.reset();
+  machine.applySettings();
+  pins.rebuild();
+  $("settings").hidden = true;
+}
+
+function frame() {
+  const t = nowS();
+  if (!$("view-machine").hidden) {
+    if (machine.scene) machine.scene.render();
+    machine.force.draw(t);
+    for (const tile of kpi.tiles.values()) tile.plot.draw(t);
+    machine.renderStatus();
+  } else {
+    if (pins.plot && cfg.pins.length) pins.plot.draw(t);
+  }
+  requestAnimationFrame(frame);
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  document.querySelectorAll(".nav-btn").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+  $("topics-input").value = cfg.topics.join(", ");
+  $("btn-subscribe").addEventListener("click", () => { cfg.topics = parseTopicList($("topics-input").value); saveSettings(); syncConnections(); });
+  $("topics-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-subscribe").click(); });
+  $("btn-unpin-all").addEventListener("click", () => { cfg.pins = []; saveSettings(); pins.rebuild(); });
+  $("btn-settings").addEventListener("click", openSettings);
+  $("btn-close-settings").addEventListener("click", () => { $("settings").hidden = true; });
+  $("settings").addEventListener("click", (e) => { if (e.target === $("settings")) $("settings").hidden = true; });
+  $("btn-save-settings").addEventListener("click", applySettingsForm);
+  $("btn-reset-settings").addEventListener("click", () => { const keep = { topics: cfg.topics, pins: cfg.pins, view: cfg.view }; cfg = Object.assign(clone(DEFAULTS), keep); openSettings(); });
+  $("btn-retry").addEventListener("click", () => { if (demo) { location.href = location.pathname; return; } fetchBootstrap().then((ok) => ok && syncConnections()); });
+  $("btn-demo").addEventListener("click", startDemo);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("settings").hidden = true; });
+
+  machine.init();
+  pins.rebuild();
+  showView(cfg.view === "machine" ? "machine" : "telemetry");
+  setInterval(renderTelemetry, 250);
+  requestAnimationFrame(frame);
+
+  if (/[?&]demo\b/.test(location.search)) { startDemo(); return; }
+  if (await fetchBootstrap()) syncConnections();
+  else { syncConnections(); updateConnBadge(); }
+  // keep retrying the bootstrap while the bridge is down
+  setInterval(async () => { if (!bootstrap && !demo && await fetchBootstrap()) syncConnections(); }, 4000);
 });
 </script>
 </body>

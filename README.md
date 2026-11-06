@@ -141,13 +141,30 @@ dot in the top bar shows the connections (green: all open).
 Two views, from the left menu (bottom bar on a phone):
 
 - **Telemetry**: the subscribed topics (comma-separated, saved in the browser),
-  each with its message rate and the latest message as a live tree. Hover a
-  number and press ◦ to add it to the plot at the top (up to 8 signals).
-  These topics are refreshed at 10 Hz by default.
+  each with its message rate, automatic plots and the latest message as a live
+  tree. Every array of up to 12 numbers gets a plot, every other number a tile
+  with a sparkline; times and counters (`t_us`, `timecode`, `timestamp`,
+  `..._id`) are left out. The Plots button of a card hides them. Hover any
+  number in the tree and press ◦ to add it to the shared plot at the top (up
+  to 8 signals). These topics are read at 50 messages per second by default.
 - **Machine**: a 3-D model of the machine, positioned by the EKF state, with
-  the tool-tip path drawn on the rotary table; the cutting/air state; the
-  cutting force (|F|, Fx, Fy, Fz and their plot); KPI tiles; the health of the
-  filter. The EKF and KPI topics are read at full rate.
+  the tool-tip path drawn on the rotary table; the cutting/air state; the axis
+  positions (readout and plots of X Y Z and A C); the cutting force (|F|, Fx,
+  Fy, Fz and their plot); KPI tiles with sparklines; the health of the filter
+  with a plot of the NIS. The EKF and KPI topics are read at full rate.
+
+Every card has an enlarge button (top right of the card, Esc to close), and
+every plot can be resized by dragging its bottom-right corner (the height is
+remembered). On a plot:
+
+| Action | Effect |
+|---|---|
+| hover | values of every series under the cursor |
+| click | pause / resume |
+| drag sideways | scroll back in time (up to 60 s, or 3 time windows) |
+| Ctrl + wheel (or pinch) | zoom the time window of that plot |
+| double-click | back to live, default window |
+| click a legend entry | hide / show that series |
 
 Defaults, all changeable in Settings (gear, top right):
 

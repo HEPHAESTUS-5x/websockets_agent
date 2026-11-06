@@ -238,6 +238,34 @@ input, select { font: inherit; }
 .health b { font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; }
 .health b.bad { color: var(--bad); }
 
+/* ---------- enlarge and resize ---------- */
+:root { --bottom-bar: 0px; }
+.icon-btn.sm { width: 28px; height: 28px; border-radius: 8px; flex: none; }
+.icon-btn.sm svg { width: 15px; height: 15px; }
+.plot-box.resizable { resize: vertical; overflow: hidden; min-height: 80px; max-height: 1200px; }
+.max-bg { position: fixed; inset: var(--top-h) 0 var(--bottom-bar) var(--side-w); background: rgba(5, 6, 9, .6); z-index: 29; }
+.max-bg[hidden] { display: none; }
+.card.maximized {
+  position: fixed; z-index: 30; top: calc(var(--top-h) + 12px); left: calc(var(--side-w) + 12px); right: 12px;
+  bottom: calc(var(--bottom-bar) + 12px); display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .65); border-color: var(--border-2);
+}
+.card.maximized > .card-h { position: sticky; top: 0; background: var(--panel); z-index: 2; border-radius: 14px 14px 0 0; }
+.card.maximized > .card-b { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.card.maximized > .card-b > .plot-box { flex: 1 1 0; height: auto !important; min-height: 140px; resize: none; }
+.card.maximized .kpi-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.card.maximized .kpi .kval { font-size: 28px; }
+.card.maximized .kpi canvas { height: 110px; }
+.card.maximized .dro span { font-size: 26px; }
+.topic-card.maximized { display: block; overflow-y: auto; }
+.topic-card.maximized .tp-arrays { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 0 18px; }
+.topic-card.maximized .tp-box { height: 320px !important; resize: none; }
+.topic-card.maximized .tp-scalars { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.topic-card.maximized .kpi.small .kval { font-size: 20px; }
+.topic-card.maximized .kpi.small canvas { height: 60px; }
+.topic-card.maximized .tree-wrap { max-height: none; }
+.viewport.maximized { min-height: 0; }
+
 /* ---------- settings ---------- */
 .modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 40; display: flex; justify-content: flex-end; }
 .modal-bg[hidden] { display: none; }
@@ -260,7 +288,9 @@ input, select { font: inherit; }
   .side-col { overflow: visible; }
 }
 @media (max-width: 760px) {
-  :root { --side-w: 0px; --top-h: 52px; }
+  :root { --side-w: 0px; --top-h: 52px; --bottom-bar: calc(58px + env(safe-area-inset-bottom)); }
+  .topic-card.maximized .tp-arrays { grid-template-columns: 1fr; }
+  .topic-card.maximized .tp-box { height: 220px !important; }
   .brand .sub, .conn .addr { display: none; }
   .side {
     top: auto; bottom: 0; width: 100%; height: calc(58px + env(safe-area-inset-bottom)); flex-direction: row;
@@ -316,6 +346,7 @@ input, select { font: inherit; }
 </nav>
 
 <main class="main">
+  <div class="max-bg" id="max-bg" hidden></div>
   <!-- ═════════════ TELEMETRY ═════════════ -->
   <section class="view" id="view-telemetry">
     <div class="banner" id="banner" hidden>
@@ -335,8 +366,8 @@ input, select { font: inherit; }
     </div>
 
     <div class="card pinned" id="pinned-card" hidden>
-      <div class="card-h"><span class="grow">Pinned signals</span><button class="btn small" id="btn-unpin-all">Clear</button></div>
-      <div class="card-b" style="padding-bottom:8px"><div class="plot-box"><canvas id="pinned-plot"></canvas></div></div>
+      <div class="card-h"><span class="grow">Pinned signals</span><button class="btn small" id="btn-unpin-all">Clear</button><button class="icon-btn sm max-btn" title="Enlarge (Esc to close)" aria-label="Enlarge"></button></div>
+      <div class="card-b" style="padding-bottom:8px"><div class="plot-box resizable" data-size="pinned"><canvas id="pinned-plot"></canvas></div></div>
       <div class="pin-chips" id="pin-chips"></div>
     </div>
 
@@ -359,12 +390,13 @@ input, select { font: inherit; }
           <button class="btn small" data-cam="top">Top</button>
           <button class="btn small on" id="btn-path">Tool path</button>
           <button class="btn small" id="btn-clear-path">Clear path</button>
+          <button class="icon-btn sm max-btn" title="Enlarge (Esc to close)" aria-label="Enlarge"></button>
         </div>
       </div>
 
       <div class="side-col">
         <div class="card">
-          <div class="card-h"><span class="grow">Position</span><span class="mono" style="text-transform:none;letter-spacing:0" id="pos-path"></span></div>
+          <div class="card-h"><span class="grow">Position</span><span class="mono" style="text-transform:none;letter-spacing:0" id="pos-path"></span><button class="icon-btn sm max-btn" title="Enlarge (Esc to close)" aria-label="Enlarge"></button></div>
           <div class="card-b">
             <div class="dro">
               <div><b style="color:var(--ax-x)">X</b><span id="dro-x">—</span><small>mm</small></div>
@@ -373,13 +405,13 @@ input, select { font: inherit; }
               <div><b style="color:var(--ax-a)">A</b><span id="dro-a">—</span><small>deg</small></div>
               <div><b style="color:var(--ax-c)">C</b><span id="dro-c">—</span><small>deg</small></div>
             </div>
-            <div class="plot-box" style="height:150px;margin-top:12px"><canvas id="pos-lin-plot"></canvas></div>
-            <div class="plot-box" style="height:120px;margin-top:6px"><canvas id="pos-rot-plot"></canvas></div>
+            <div class="plot-box resizable" data-size="pos-lin" style="height:150px;margin-top:12px"><canvas id="pos-lin-plot"></canvas></div>
+            <div class="plot-box resizable" data-size="pos-rot" style="height:120px;margin-top:6px"><canvas id="pos-rot-plot"></canvas></div>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-h"><span class="grow">Cutting force</span></div>
+          <div class="card-h"><span class="grow">Cutting force</span><button class="icon-btn sm max-btn" title="Enlarge (Esc to close)" aria-label="Enlarge"></button></div>
           <div class="card-b">
             <div class="force-head">
               <div class="force-big" id="force-norm">—<small>N</small></div>
@@ -389,12 +421,12 @@ input, select { font: inherit; }
                 <span><b style="color:var(--ax-z)">Fz</b><span id="fz">—</span></span>
               </div>
             </div>
-            <div class="plot-box" style="height:190px"><canvas id="force-plot"></canvas></div>
+            <div class="plot-box resizable" data-size="force" style="height:190px"><canvas id="force-plot"></canvas></div>
           </div>
         </div>
 
         <div class="card">
-          <div class="card-h"><span class="grow">KPI</span><span class="mono" style="text-transform:none;letter-spacing:0" id="kpi-src"></span></div>
+          <div class="card-h"><span class="grow">KPI</span><span class="mono" style="text-transform:none;letter-spacing:0" id="kpi-src"></span><button class="icon-btn sm max-btn" title="Enlarge (Esc to close)" aria-label="Enlarge"></button></div>
           <div class="card-b">
             <div class="kpi-grid" id="kpi-grid"></div>
             <div class="empty" id="kpi-empty">Waiting for a message with a <span class="mono">"kpi"</span> object.<br>Every number inside it becomes a tile. Set its topic in Settings, or subscribe to it in Telemetry.</div>
@@ -402,7 +434,7 @@ input, select { font: inherit; }
         </div>
 
         <div class="card">
-          <div class="card-h"><span class="grow">Filter health</span></div>
+          <div class="card-h"><span class="grow">Filter health</span><button class="icon-btn sm max-btn" title="Enlarge (Esc to close)" aria-label="Enlarge"></button></div>
           <div class="card-b">
             <div class="health">
               <div><span>NIS</span><b id="h-nis">—</b></div>
@@ -412,7 +444,7 @@ input, select { font: inherit; }
               <div><span>timing gaps</span><b id="h-gaps">—</b></div>
               <div><span>FMU rejections</span><b id="h-fmurej">—</b></div>
             </div>
-            <div class="plot-box" style="height:110px;margin-top:10px"><canvas id="nis-plot"></canvas></div>
+            <div class="plot-box resizable" data-size="nis" style="height:110px;margin-top:10px"><canvas id="nis-plot"></canvas></div>
           </div>
         </div>
       </div>
@@ -490,6 +522,7 @@ const DEFAULTS = {
   window: 20,
   telemetryHz: 50,
   plotsOff: [],        // topics whose card plots are switched off
+  sizes: {},           // heights of the plots resized by hand [px]
   pins: [],            // [{topic, path: [..]}]
   view: "telemetry",
 };
@@ -556,45 +589,100 @@ const nowS = () => performance.now() / 1000;
 // Time-series plot on a canvas (no library). Per-pixel min/max, so it stays
 // fast with thousands of samples.
 // ═════════════════════════════════════════════════════════════════════════════
+// Interactions (not on sparklines):
+//   hover: values under the cursor     click: pause / resume
+//   drag: scroll back in time (pauses)  Ctrl+wheel or pinch: zoom the time window
+//   double-click: back to live          click a legend entry: hide / show that series
+const PLOT_HELP = "Hover: values · click: pause/resume · drag: scroll back · Ctrl+wheel: zoom time · double-click: live · click legend: hide series · drag bottom-right corner: resize";
 class TimePlot {
   constructor(canvas, opts = {}) {
     this.c = canvas;
     this.ctx = canvas.getContext("2d");
     this.series = [];
-    this.window = opts.window || 20;
+    this.window = opts.window || 20;     // base window [s] (from the settings)
+    this.view = null;                    // window chosen with the wheel, null = base
+    this.paused = false; this.tEnd = 0;  // when paused, the right edge of the plot
+    this.hoverX = null;
     this.unit = opts.unit || "";
-    this.compact = !!opts.compact;   // sparkline: no axes, no legend
+    this.compact = !!opts.compact;   // sparkline: no axes, no legend, no interaction
     this.minSpan = opts.minSpan || 1e-9;
     this.maxPoints = opts.maxPoints || 6000;
     this.legendValues = opts.legendValues !== false;
+    this.legendHits = [];
+    this.lastNow = 0;
     this.dirty = true;
+    if (!this.compact) this.interact();
   }
+  get win() { return this.view || this.window; }
+  get history() { return Math.max(this.window * 3, 60); }
   addSeries(def) {
     const i = this.series.length;
-    this.series.push({ name: def.name, color: def.color || SERIES_COLORS[i % SERIES_COLORS.length], t: [], v: [], last: NaN });
+    this.series.push({ name: def.name, color: def.color || SERIES_COLORS[i % SERIES_COLORS.length], t: [], v: [], last: NaN, hidden: false });
     this.dirty = true;
     return i;
   }
   setSeries(defs) {
-    this.series = defs.map((d, i) => ({ name: d.name, color: d.color || SERIES_COLORS[i % SERIES_COLORS.length], t: [], v: [], last: NaN }));
+    this.series = defs.map((d, i) => ({ name: d.name, color: d.color || SERIES_COLORS[i % SERIES_COLORS.length], t: [], v: [], last: NaN, hidden: false }));
     this.dirty = true;
   }
   push(i, t, v) {
     const s = this.series[i];
     if (!s || !Number.isFinite(v)) return;
     const n = s.t.length;
-    // keep at most maxPoints over the window: skip samples closer than window/maxPoints
+    // keep at most maxPoints per base window: merge samples closer than window/maxPoints
     if (n && t - s.t[n - 1] < this.window / this.maxPoints) { s.v[n - 1] = v; s.last = v; this.dirty = true; return; }
     s.t.push(t); s.v.push(v); s.last = v;
-    const t0 = t - this.window * 1.05;
+    const t0 = t - (this.compact ? this.window * 1.05 : this.history);
     let k = 0;
     while (k < s.t.length && s.t[k] < t0) k++;
     if (k > 512 || k > s.t.length / 2) { s.t.splice(0, k); s.v.splice(0, k); }
     this.dirty = true;
   }
   clear() { for (const s of this.series) { s.t = []; s.v = []; s.last = NaN; } this.dirty = true; }
+  live() { this.paused = false; this.view = null; this.dirty = true; }
+  interact() {
+    const c = this.c;
+    c.title = PLOT_HELP;
+    c.style.cursor = "crosshair";
+    c.style.touchAction = "pan-y";
+    let down = null;
+    c.addEventListener("pointermove", (e) => {
+      this.hoverX = e.offsetX;
+      if (down && (e.buttons & 1)) {
+        const dx = e.clientX - down.x;
+        if (Math.abs(dx) > 3) down.drag = true;
+        if (down.drag) {
+          const pw = Math.max(1, c.clientWidth - 62);
+          this.paused = true;
+          this.tEnd = Math.min(this.lastNow, Math.max(this.lastNow - this.history + this.win, down.tEnd - dx / pw * this.win));
+        }
+      }
+    });
+    c.addEventListener("pointerleave", () => { this.hoverX = null; });
+    c.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      c.setPointerCapture(e.pointerId);
+      down = { x: e.clientX, tEnd: this.paused ? this.tEnd : this.lastNow, drag: false };
+    });
+    c.addEventListener("pointerup", (e) => {
+      if (!down) return;
+      const wasDrag = down.drag; down = null;
+      if (wasDrag) return;
+      const hit = this.legendHits.find((h) => e.offsetX >= h.x0 && e.offsetX <= h.x1 && e.offsetY >= h.y0 && e.offsetY <= h.y1);
+      if (hit) { hit.s.hidden = !hit.s.hidden; return; }
+      if (this.paused) this.paused = false;
+      else { this.paused = true; this.tEnd = this.lastNow; }
+    });
+    c.addEventListener("dblclick", () => this.live());
+    c.addEventListener("wheel", (e) => {
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) return;      // plain wheel scrolls the page
+      e.preventDefault();
+      this.view = Math.min(this.history, Math.max(0.2, this.win * Math.exp(e.deltaY * 0.002)));
+    }, { passive: false });
+  }
   draw(now) {
     const c = this.c, ctx = this.ctx;
+    this.lastNow = now;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const W = Math.max(1, Math.round(c.clientWidth * dpr)), H = Math.max(1, Math.round(c.clientHeight * dpr));
     if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
@@ -602,11 +690,13 @@ class TimePlot {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const w = c.clientWidth, h = c.clientHeight;
     ctx.clearRect(0, 0, w, h);
-    const t1 = now, t0 = now - this.window;
+    const win = this.compact ? this.window : this.win;
+    const t1 = this.paused ? this.tEnd : now, t0 = t1 - win;
     let lo = Infinity, hi = -Infinity;
     for (const s of this.series) {
+      if (s.hidden) continue;
       for (let i = 0; i < s.t.length; i++) {
-        if (s.t[i] < t0) continue;
+        if (s.t[i] < t0 || s.t[i] > t1) continue;
         const v = s.v[i];
         if (v < lo) lo = v;
         if (v > hi) hi = v;
@@ -623,12 +713,12 @@ class TimePlot {
     const legend = [];
     if (!this.compact) {
       let x = L, row = 0;
-      const right = w - R - (this.unit ? ctx.measureText(this.unit).width + 10 : 0);
+      const right = w - R - 70;
       for (const s of this.series) {
         const label = this.legendValues ? `${s.name} ${Number.isFinite(s.last) ? fmtAuto(s.last) : "—"}` : s.name;
         const wl = 14 + ctx.measureText(label).width;
         if (x > L && x + wl > right) { x = L; row++; }
-        legend.push({ x, row, label, color: s.color });
+        legend.push({ x, row, label, s, wl });
         x += wl + 16;
       }
     }
@@ -649,13 +739,15 @@ class TimePlot {
         ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
         ctx.fillText(fmtTick(v, step), L - 6, y);
       }
-      // x labels: seconds ago
+      // x labels: seconds before now
       ctx.textAlign = "center"; ctx.textBaseline = "top";
-      const xs = niceStep(this.window / 5);
-      for (let s = 0; s <= this.window + 1e-9; s += xs) {
-        const x = Math.round(X(t1 - s)) + 0.5;
+      const xs = niceStep(win / 5);
+      const ago0 = now - t1;
+      for (let a = Math.ceil(ago0 / xs - 1e-9) * xs; a <= ago0 + win + 1e-9; a += xs) {
+        const x = Math.round(X(now - a)) + 0.5;
+        if (x < L - 1 || x > L + pw + 1) continue;
         ctx.strokeStyle = "#1d222c"; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke();
-        ctx.fillText(s === 0 ? "now" : `-${+s.toFixed(3)} s`, x, T + ph + 6);
+        ctx.fillText(a < xs * 1e-6 ? "now" : `-${+a.toFixed(3)} s`, x, T + ph + 6);
       }
       if (lo < 0 && hi > 0) { ctx.strokeStyle = "#3a4152"; ctx.beginPath(); ctx.moveTo(L, Math.round(Y(0)) + 0.5); ctx.lineTo(L + pw, Math.round(Y(0)) + 0.5); ctx.stroke(); }
     }
@@ -663,6 +755,7 @@ class TimePlot {
     ctx.save();
     ctx.beginPath(); ctx.rect(L, T - 1, pw, ph + 2); ctx.clip();
     for (const s of this.series) {
+      if (s.hidden) continue;
       ctx.strokeStyle = s.color; ctx.lineWidth = this.compact ? 1.4 : 1.6; ctx.lineJoin = "round";
       ctx.beginPath();
       let px = -1, mn = 0, mx = 0, first = true;
@@ -671,8 +764,8 @@ class TimePlot {
         if (first) { ctx.moveTo(px, Y(mn)); first = false; } else ctx.lineTo(px, Y(mn));
         if (mx !== mn) ctx.lineTo(px, Y(mx));
       };
-      for (let i = 0; i < s.t.length; i++) {
-        if (s.t[i] < t0 - this.window * 0.02) continue;
+      for (let i = lowerBound(s.t, t0 - win * 0.02); i < s.t.length; i++) {
+        if (s.t[i] > t1 + win * 0.02) break;
         const x = Math.round(X(s.t[i]));
         const v = s.v[i];
         if (x !== px) { flush(); px = x; mn = mx = v; }
@@ -683,18 +776,66 @@ class TimePlot {
     }
     ctx.restore();
     if (!this.compact) {
-      // legend with the latest values
+      // legend (click to hide a series)
       ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      this.legendHits = [];
       for (const it of legend) {
         const y = 10 + it.row * 15;
-        ctx.fillStyle = it.color; ctx.fillRect(it.x, y - 2, 10, 3);
+        ctx.globalAlpha = it.s.hidden ? 0.35 : 1;
+        ctx.fillStyle = it.s.color; ctx.fillRect(it.x, y - 2, 10, 3);
         ctx.fillStyle = "#c9cfda"; ctx.fillText(it.label, it.x + 14, y);
+        if (it.s.hidden) { ctx.fillRect(it.x + 14, y, it.wl - 14, 1); }
+        ctx.globalAlpha = 1;
+        this.legendHits.push({ s: it.s, x0: it.x - 2, x1: it.x + it.wl + 2, y0: y - 8, y1: y + 8 });
       }
-      if (this.unit) { ctx.textAlign = "right"; ctx.fillStyle = "#6c7586"; ctx.fillText(this.unit, w - R, 10); }
+      // right corner: unit, zoom, pause
+      ctx.textAlign = "right";
+      const tags = [];
+      if (this.unit) tags.push(this.unit);
+      if (this.view) tags.push(`${+this.view.toPrecision(2)} s`);
+      if (this.paused) tags.push("❚❚ paused");
+      ctx.fillStyle = this.paused ? "#f5a623" : "#6c7586";
+      ctx.fillText(tags.join("  "), w - R, 10);
       if (empty) { ctx.textAlign = "center"; ctx.fillStyle = "#5c6576"; ctx.fillText("no data", L + pw / 2, T + ph / 2); }
+      // hover: cursor line and the values under it
+      const hx = this.hoverX;
+      if (hx !== null && hx >= L && hx <= L + pw && !empty) {
+        const th = t0 + (hx - L) / pw * win;
+        ctx.strokeStyle = "rgba(230,232,236,.35)"; ctx.beginPath(); ctx.moveTo(Math.round(hx) + 0.5, T); ctx.lineTo(Math.round(hx) + 0.5, T + ph); ctx.stroke();
+        const lines = [];
+        for (const s of this.series) {
+          if (s.hidden || !s.t.length) continue;
+          let i = lowerBound(s.t, th);
+          if (i >= s.t.length) i = s.t.length - 1;
+          if (i > 0 && th - s.t[i - 1] < s.t[i] - th) i--;
+          if (Math.abs(s.t[i] - th) > win / 20) continue;
+          lines.push([s, s.v[i]]);
+          ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(hx, Y(s.v[i]), 3, 0, 2 * Math.PI); ctx.fill();
+        }
+        if (lines.length) {
+          const head = `${(now - th).toFixed(3)} s ago`;
+          const bw = Math.max(ctx.measureText(head).width, ...lines.map(([s, v]) => ctx.measureText(`${s.name}  ${fmtAuto(v)}`).width)) + 26;
+          const bh = 18 + lines.length * 15;
+          let bx = hx + 12; if (bx + bw > w - 4) bx = hx - 12 - bw;
+          const by = Math.min(Math.max(T + 4, 0), h - bh - 2);
+          ctx.fillStyle = "rgba(14,16,20,.92)"; ctx.strokeStyle = "#333a48";
+          ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.fill(); ctx.stroke();
+          ctx.textAlign = "left"; ctx.fillStyle = "#8b93a4"; ctx.fillText(head, bx + 8, by + 10);
+          lines.forEach(([s, v], k) => {
+            const y = by + 25 + k * 15;
+            ctx.fillStyle = s.color; ctx.fillRect(bx + 8, y - 2, 8, 3);
+            ctx.fillStyle = "#e6e8ec"; ctx.fillText(`${s.name}  ${fmtAuto(v)}`, bx + 20, y);
+          });
+        }
+      }
     }
     this.dirty = false;
   }
+}
+function lowerBound(a, x) {
+  let lo = 0, hi = a.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < x) lo = m + 1; else hi = m; }
+  return lo;
 }
 const PLOT_FONT = '11px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 function niceStep(raw) {
@@ -894,7 +1035,8 @@ function syncTopicCards() {
     el.className = "card topic-card";
     el.innerHTML = `<div class="card-h"><div class="dot idle"></div><span class="tname"></span><span class="grow"></span><span class="stats"></span>
       <button class="btn small" data-act="plots">Plots</button>
-      <button class="btn small" data-act="expand">Expand</button></div>
+      <button class="btn small" data-act="expand" title="Open or close every node of the message">Open all</button>
+      <button class="icon-btn sm max-btn" title="Enlarge (Esc to close)" aria-label="Enlarge"></button></div>
       <div class="meta"></div><div class="tp"></div><div class="tree-wrap"><div class="tree"></div></div>`;
     el.querySelector(".tname").textContent = name;
     const treeEl = el.querySelector(".tree");
@@ -910,9 +1052,10 @@ function syncTopicCards() {
     pb.addEventListener("click", () => setPlots(!card.plotsOn));
     treeEl.innerHTML = '<div class="empty">Waiting for messages…</div>';
     el.querySelector('[data-act="expand"]').addEventListener("click", (ev) => {
-      const b = ev.currentTarget; const open = b.textContent === "Expand";
-      card.tree.setAll(open); b.textContent = open ? "Collapse" : "Expand";
+      const b = ev.currentTarget; const open = b.textContent === "Open all";
+      card.tree.setAll(open); b.textContent = open ? "Close all" : "Open all";
     });
+    initMaxButtons(el);
     cards.set(name, card);
     grid.appendChild(el);
   }
@@ -958,8 +1101,9 @@ class TopicPlots {
   addArray(key, n) {
     this.noneEl.hidden = true;
     const el = document.createElement("div"); el.className = "tp-plot";
-    el.innerHTML = '<div class="tp-title"></div><div class="plot-box tp-box"><canvas></canvas></div>';
+    el.innerHTML = '<div class="tp-title"></div><div class="plot-box tp-box resizable"><canvas></canvas></div>';
     el.querySelector(".tp-title").textContent = key;
+    makeResizable(el.querySelector(".plot-box"), `${this.topic}:${key}`);
     this.aEl.appendChild(el);
     const plot = new TimePlot(el.querySelector("canvas"), { window: cfg.window });
     let names = Array.from({ length: n }, (_, i) => `[${i}]`), colors = null;
@@ -1712,7 +1856,59 @@ function startDemo() {
 // ═════════════════════════════════════════════════════════════════════════════
 // Views, settings, init
 // ═════════════════════════════════════════════════════════════════════════════
+// ── enlarge a card to (almost) the whole page; Esc or the backdrop closes it ──
+const ICON_MAX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>';
+const ICON_MIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/></svg>';
+function initMaxButtons(root) {
+  root.querySelectorAll(".max-btn").forEach((b) => {
+    if (b.dataset.ready) return;
+    b.dataset.ready = "1"; b.innerHTML = ICON_MAX;
+    b.addEventListener("click", (e) => { e.stopPropagation(); toggleMax(b.closest(".card")); });
+  });
+}
+function setMax(card, on) {
+  card.classList.toggle("maximized", on);
+  const b = card.querySelector(".max-btn");
+  if (b) { b.innerHTML = on ? ICON_MIN : ICON_MAX; b.title = on ? "Back to normal size (Esc)" : "Enlarge (Esc to close)"; }
+  $("max-bg").hidden = !document.querySelector(".card.maximized");
+  if (machine.scene) machine.scene.dirty = true;
+}
+function toggleMax(card) {
+  const on = !card.classList.contains("maximized");
+  document.querySelectorAll(".card.maximized").forEach((c) => setMax(c, false));
+  if (on) setMax(card, true);
+}
+function closeMax() { document.querySelectorAll(".card.maximized").forEach((c) => setMax(c, false)); }
+
+// ── plots resized by dragging their corner keep their height ──
+let sizeSaveTimer = null;
+const sizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver((entries) => {
+  for (const e of entries) {
+    const box = e.target, key = box.dataset.size;
+    if (!key || box.closest(".maximized") || !box.offsetHeight || !box.style.height) continue;
+    const hpx = Math.round(box.offsetHeight);
+    if (cfg.sizes[key] !== hpx) { cfg.sizes[key] = hpx; clearTimeout(sizeSaveTimer); sizeSaveTimer = setTimeout(saveSettings, 400); }
+  }
+}) : null;
+// also on mouse release: ResizeObserver callbacks come late when the page renders slowly
+function saveResizedPlots() {
+  let changed = false;
+  document.querySelectorAll(".plot-box.resizable[data-size]").forEach((box) => {
+    if (box.closest(".maximized") || !box.offsetHeight || !box.style.height) return;
+    const hpx = Math.round(box.offsetHeight), key = box.dataset.size;
+    if (cfg.sizes[key] !== hpx) { cfg.sizes[key] = hpx; changed = true; }
+  });
+  if (changed) saveSettings();
+}
+document.addEventListener("pointerup", () => setTimeout(saveResizedPlots, 30));
+function makeResizable(box, key) {
+  box.dataset.size = key;
+  if (cfg.sizes && cfg.sizes[key]) box.style.height = cfg.sizes[key] + "px";
+  if (sizeObserver) sizeObserver.observe(box);
+}
+
 function showView(v) {
+  closeMax();
   cfg.view = v; saveSettings();
   document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
   $("view-telemetry").hidden = v !== "telemetry";
@@ -1762,19 +1958,26 @@ function applySettingsForm() {
   $("settings").hidden = true;
 }
 
+let lastPlotDraw = 0;
 function frame() {
   const t = nowS();
+  const drawPlots = t - lastPlotDraw >= 1 / 32;   // 2-D plots at ~30 fps
+  if (drawPlots) lastPlotDraw = t;
+  // with a card enlarged, only that card is visible: draw only its plots
+  const maxCard = document.querySelector(".card.maximized");
+  const shown = (el) => !maxCard || maxCard.contains(el);
   if (!$("view-machine").hidden) {
-    if (machine.scene) machine.scene.render();
-    machine.force.draw(t);
-    machine.posLin.draw(t); machine.posRot.draw(t); machine.nis.draw(t);
-    for (const tile of kpi.tiles.values()) tile.plot.draw(t);
+    if (machine.scene && shown(machine.scene.canvas)) machine.scene.render();
+    if (drawPlots) {
+      for (const pl of [machine.force, machine.posLin, machine.posRot, machine.nis]) if (shown(pl.c)) pl.draw(t);
+      for (const tile of kpi.tiles.values()) if (shown(tile.el)) tile.plot.draw(t);
+    }
     machine.renderStatus();
-  } else {
-    if (pins.plot && cfg.pins.length) pins.plot.draw(t);
+  } else if (drawPlots) {
+    if (pins.plot && cfg.pins.length && shown(pins.plot.c)) pins.plot.draw(t);
     const H = window.innerHeight;
     for (const c of cards.values()) {
-      if (!c.plotsOn) continue;
+      if (!c.plotsOn || !shown(c.el)) continue;
       const r = c.el.getBoundingClientRect();
       if (r.bottom > 0 && r.top < H) c.plots.draw(t);
     }
@@ -1795,7 +1998,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("btn-reset-settings").addEventListener("click", () => { const keep = { topics: cfg.topics, pins: cfg.pins, view: cfg.view }; cfg = Object.assign(clone(DEFAULTS), keep); openSettings(); });
   $("btn-retry").addEventListener("click", () => { if (demo) { location.href = location.pathname; return; } fetchBootstrap().then((ok) => ok && syncConnections()); });
   $("btn-demo").addEventListener("click", startDemo);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("settings").hidden = true; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { $("settings").hidden = true; closeMax(); } });
+  $("max-bg").addEventListener("click", closeMax);
+  initMaxButtons(document);
+  document.querySelectorAll(".plot-box.resizable[data-size]").forEach((b) => makeResizable(b, b.dataset.size));
 
   machine.init();
   pins.rebuild();

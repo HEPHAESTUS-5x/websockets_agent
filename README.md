@@ -138,24 +138,34 @@ same origin to learn the WebSocket `scheme`, `port`, and `path`, then opens one
 WebSocket per topic and reconnects on its own when the bridge restarts. The
 dot in the top bar shows the connections (green: all open).
 
-Two views, from the left menu (bottom bar on a phone):
+Three views, from the left menu (bottom bar on a phone):
 
 - **Telemetry**: the subscribed topics (comma-separated, saved in the browser),
-  each with its message rate, automatic plots and the latest message as a live
-  tree. Every array of up to 12 numbers gets a plot, every other number a tile
-  with a sparkline; times and counters (`t_us`, `timecode`, `timestamp`,
-  `..._id`) are left out. The Plots button of a card hides them. Hover any
-  number in the tree and press ◦ to add it to the shared plot at the top (up
-  to 8 signals). These topics are read at 50 messages per second by default.
+  one card each, tiled to fill the screen (cards and plots resize with the
+  window; with many topics the page scrolls). Every array of up to 12 numbers
+  gets a plot, every other number a tile with a sparkline; times and counters
+  (`t_us`, `timecode`, `timestamp`, `..._id`) are left out. The Plots button of
+  a card hides them; the Message button shows the latest message as a live
+  tree, where ◦ next to a number adds it to the selected custom plot. These
+  topics are read at 50 messages per second by default.
 - **Machine**: a 3-D model of the machine, positioned by the EKF state, with
   the tool-tip path drawn on the rotary table; the cutting/air state; the axis
   positions (readout and plots of X Y Z and A C); the cutting force (|F|, Fx,
   Fy, Fz and their plot); KPI tiles with sparklines; the health of the filter
   with a plot of the NIS. The EKF and KPI topics are read at full rate.
+- **Custom**: plots you build. The Fields list holds every number (and
+  boolean, as 0/1) that has arrived on the subscribed topics, with its live
+  value; arrays are one row that opens into their elements. Drag a field, or a
+  whole array, onto a plot, or onto the bar that appears at the bottom to start
+  a new plot; or tick it to add it to the selected plot (click a plot to select
+  it). `+ New plot` adds an empty one. Each plot holds up to 8 signals, shown as
+  chips: × removes one, dragging a chip moves it to another plot. Titles can be
+  edited. The plots tile the page and are saved in the browser. A field shows
+  its last minute at once: the page keeps a short history of every field.
 
-Every card has an enlarge button (top right of the card, Esc to close), and
-every plot can be resized by dragging its bottom-right corner (the height is
-remembered). On a plot:
+Every card has an enlarge button (top right of the card, Esc to close). The
+plots of the Machine view can also be resized by dragging their bottom-right
+corner (the height is remembered). On a plot:
 
 | Action | Effect |
 |---|---|

@@ -8,12 +8,14 @@
   MADS live dashboard for the Huron U-Mill 5, served by mads-websockets (-w).
   Single file, no external resources: it must work on a workshop LAN without internet.
 
-  Two views (left menu, or bottom bar on a phone):
-    Telemetry  every message of the subscribed topics, as a live tree; any number
-               can be pinned to the plot at the top
+  Three views (left menu, or bottom bar on a phone):
+    Telemetry  one card per subscribed topic, sized to fill the screen: automatic
+               plots of its numbers and, on request, the message as a live tree
     Machine    3-D model positioned by the EKF state (eekf.position), cutting
                force (eekf.force_n), KPI tiles (any message with a "kpi" object)
                and the health of the filter
+    Custom     plots made by the user: pick or drag any field of any topic onto a
+               plot; the plots tile the page
   Topics and field paths are in Settings (gear, top right), saved in this browser.
   Without the bridge, open the page with ?demo to see it run on generated data.
 -->
@@ -138,11 +140,15 @@ input, select { font: inherit; }
 .banner .grow { flex: 1; min-width: 200px; }
 
 /* ---------- telemetry view ---------- */
+.sub-bar { padding: 9px 12px; }
 .subscribe { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.subscribe .field-input { flex: 1; min-width: 220px; }
+.subscribe .field-input { flex: 1; min-width: 220px; padding: 7px 10px; }
+.sub-lbl { font-size: 12px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--muted); }
+.help {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: none;
+  border-radius: 50%; border: 1px solid var(--border-2); color: var(--muted); font-size: 12px; cursor: help;
+}
 .hint { font-size: 12px; color: var(--faint); margin-top: 8px; }
-.pinned { margin-top: 14px; }
-.pinned[hidden] { display: none; }
 .plot-box { position: relative; height: 230px; }
 .plot-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .pin-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 12px; }
@@ -153,7 +159,10 @@ input, select { font: inherit; }
 .chip i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .chip button { border: none; background: none; cursor: pointer; color: var(--muted); padding: 0 5px; font-size: 14px; line-height: 1; }
 .chip button:hover { color: var(--text); }
-.topic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; margin-top: 14px; align-items: start; }
+/* the grid of topic cards fills the view; columns and rows are set by tileGrid() */
+.topic-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+.topic-card { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.topic-card > .card-h, .topic-card > .meta { flex: none; }
 .topic-card .card-h { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); }
 .topic-card .tname { font-family: var(--mono); font-weight: 700; }
 .topic-card .tname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -161,14 +170,27 @@ input, select { font: inherit; }
 .topic-card .card-h .btn { flex: none; }
 .topic-card .card-h .dot { flex: none; }
 .topic-card .meta { font-size: 12px; color: var(--faint); padding: 8px 14px 0; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.topic-card .tree-wrap { padding: 8px 10px 12px 12px; max-height: 460px; overflow: auto; }
+.topic-card .tree-wrap { flex: 0 0 38%; min-height: 0; padding: 8px 10px 12px 12px; overflow: auto; border-top: 1px solid var(--border); }
+.topic-card.plots-off .tree-wrap { flex: 1 1 0; border-top: none; }
 .topic-card .tree-wrap[hidden], .tp[hidden] { display: none; }
-.tp { padding: 10px 12px 2px; border-bottom: 1px solid var(--border); }
-.tp-plot { margin-bottom: 10px; }
-.tp-title { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin: 0 0 2px 2px; }
-.tp-box { height: 140px; }
-.tp-scalars { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.tp { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; }
+.tp-arrays { flex: 1 1 0; min-height: 0; overflow: auto; display: grid; gap: 10px; }
+.tp.no-arrays .tp-arrays { display: none; }
+.tp-plot { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.tp-title { flex: none; font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin: 0 0 2px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-plot .tp-box { flex: 1 1 0; height: auto; min-height: 0; }
+.tp-scalars { flex: none; max-height: 34%; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; align-content: start; }
 .tp-scalars:empty { display: none; }
+/* next to array plots the number tiles are one compact line: name and value, sparkline on the right */
+.tp:not(.no-arrays) .tp-scalars { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; max-height: 30%; }
+.tp:not(.no-arrays) .kpi.small { display: grid; grid-template-columns: minmax(0, 1fr) 64px; column-gap: 8px; padding: 6px 9px; }
+.tp:not(.no-arrays) .kpi.small .kval { font-size: 14px; margin-top: 0; }
+.tp:not(.no-arrays) .kpi.small canvas { grid-column: 2; grid-row: 1 / span 2; height: 30px; margin-top: 0; align-self: center; }
+/* a topic with numbers only: the tiles fill the card */
+.tp.no-arrays .tp-scalars { flex: 1 1 0; max-height: none; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); grid-auto-rows: minmax(96px, 1fr); }
+.tp.no-arrays .kpi.small { display: flex; flex-direction: column; min-height: 0; }
+.tp.no-arrays .kpi.small .kval { font-size: 20px; }
+.tp.no-arrays .kpi.small canvas { flex: 1 1 0; height: auto; min-height: 28px; }
 .kpi.small { padding: 7px 9px 6px; }
 .kpi.small .kval { font-size: 15px; }
 .kpi.small canvas { height: 28px; }
@@ -257,14 +279,76 @@ input, select { font: inherit; }
 .card.maximized .kpi .kval { font-size: 28px; }
 .card.maximized .kpi canvas { height: 110px; }
 .card.maximized .dro span { font-size: 26px; }
-.topic-card.maximized { display: block; overflow-y: auto; }
-.topic-card.maximized .tp-arrays { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 0 18px; }
-.topic-card.maximized .tp-box { height: 320px !important; resize: none; }
-.topic-card.maximized .tp-scalars { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-.topic-card.maximized .kpi.small .kval { font-size: 20px; }
-.topic-card.maximized .kpi.small canvas { height: 60px; }
-.topic-card.maximized .tree-wrap { max-height: none; }
 .viewport.maximized { min-height: 0; }
+
+/* ---------- custom view ---------- */
+.cp { display: flex; gap: 14px; height: 100%; min-height: 0; position: relative; }
+.cp-fields { width: 320px; flex: none; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.cp-fields[hidden] { display: none; }
+.cp-fields .card-h { padding: 8px 10px 8px 14px; }
+.cp-search { padding: 10px 12px 6px; flex: none; }
+.cp-search .field-input { padding: 7px 10px; }
+.cp-target { padding: 0 14px 8px; font-size: 12px; color: var(--faint); flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-target b { color: #cfe0ff; font-weight: 600; }
+.cp-list { flex: 1 1 0; min-height: 0; overflow: auto; padding: 0 6px 10px; font-family: var(--mono); font-size: 12.5px; }
+.cp-topic {
+  display: flex; align-items: center; gap: 7px; padding: 8px 6px 5px; cursor: pointer; user-select: none;
+  position: sticky; top: 0; z-index: 1; background: var(--panel); font-weight: 700; color: var(--text);
+}
+.cp-topic .n { color: var(--faint); font-weight: 400; margin-left: auto; }
+.cp-row { display: flex; align-items: center; gap: 7px; padding: 3px 6px; border-radius: 6px; cursor: grab; user-select: none; }
+.cp-row:hover { background: #1d2230; }
+.cp-row.child { padding-left: 26px; }
+.cp-row input { accent-color: var(--accent); flex: none; margin: 0; width: 14px; height: 14px; cursor: pointer; }
+.cp-tw { width: 12px; flex: none; color: var(--faint); cursor: pointer; text-align: center; }
+.cp-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9fb2cf; }
+.cp-row .nm small { color: var(--faint); font-size: 11px; margin-left: 4px; }
+.cp-row .val { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7cc4ff; font-variant-numeric: tabular-nums; }
+.cp-row .sw { width: 10px; height: 3px; flex: none; border-radius: 2px; }
+.cp-main { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; position: relative; }
+.cp-bar { display: flex; align-items: center; gap: 10px; flex: none; flex-wrap: wrap; }
+.cp-bar .hint { margin: 0; flex: 1; min-width: 220px; }
+.cp-scroll { flex: 1 1 0; min-height: 0; overflow: auto; }
+.cp-grid { display: grid; gap: 14px; }
+.cp-card { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.cp-card.active { border-color: #35507f; box-shadow: inset 0 0 0 1px #35507f; }
+.cp-card .card-h { padding: 7px 8px 7px 8px; gap: 6px; text-transform: none; letter-spacing: 0; }
+.cp-title {
+  flex: 1; min-width: 0; background: none; border: 1px solid transparent; border-radius: 7px; outline: none;
+  color: var(--text); font-weight: 700; font-size: 13px; padding: 4px 7px;
+}
+.cp-title:hover { border-color: var(--border); }
+.cp-title:focus { border-color: var(--accent); background: var(--bg); }
+.cp-tag { font-size: 11px; font-weight: 600; color: #cfe0ff; background: #1f2a40; border: 1px solid #35507f; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+.cp-card:not(.active) .cp-tag { display: none; }
+.cp-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; max-height: 64px; overflow: auto; flex: none; }
+.cp-chips:empty { display: none; }
+.chip[draggable="true"] { cursor: grab; }
+.cp-card .card-b { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 6px 10px 10px; }
+.cp-card .plot-box { flex: 1 1 0; height: auto; min-height: 0; }
+.cp-drop-hint {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 20px; color: var(--faint); font-size: 13px; line-height: 1.6; pointer-events: none; background: var(--panel);
+}
+.cp-drop-hint[hidden] { display: none; }
+.cp-empty {
+  height: 100%; min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  border: 2px dashed var(--border-2); border-radius: 14px; color: var(--muted); text-align: center; padding: 24px; line-height: 1.6;
+}
+.cp-empty[hidden] { display: none; }
+.cp-new {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 74px; z-index: 5; display: none; align-items: center; justify-content: center;
+  border: 2px dashed #35507f; border-radius: 14px; background: rgba(22, 25, 32, .95); color: #cfe0ff; font-weight: 600;
+}
+body.dragging-field .cp-new { display: flex; }
+.cp-card.drop-on, .cp-new.drop-on, .cp-empty.drop-on { border-color: var(--accent); background: #18233a; }
+.toast {
+  position: fixed; left: 50%; bottom: calc(var(--bottom-bar) + 18px); transform: translateX(-50%); z-index: 50;
+  max-width: min(560px, calc(100vw - 32px)); padding: 9px 14px; border-radius: 10px; font-size: 13px;
+  background: #232835; border: 1px solid var(--border-2); box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+  opacity: 0; transition: opacity .2s; pointer-events: none;
+}
+.toast.show { opacity: 1; }
 
 /* ---------- settings ---------- */
 .modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 40; display: flex; justify-content: flex-end; }
@@ -289,8 +373,6 @@ input, select { font: inherit; }
 }
 @media (max-width: 760px) {
   :root { --side-w: 0px; --top-h: 52px; --bottom-bar: calc(58px + env(safe-area-inset-bottom)); }
-  .topic-card.maximized .tp-arrays { grid-template-columns: 1fr; }
-  .topic-card.maximized .tp-box { height: 220px !important; }
   .brand .sub, .conn .addr { display: none; }
   .side {
     top: auto; bottom: 0; width: 100%; height: calc(58px + env(safe-area-inset-bottom)); flex-direction: row;
@@ -300,7 +382,7 @@ input, select { font: inherit; }
   .nav-btn { justify-content: center; }
   .main { bottom: calc(58px + env(safe-area-inset-bottom)); }
   .view { padding: 12px; }
-  .topic-grid { grid-template-columns: 1fr; }
+  .cp-fields { position: absolute; inset: 0; z-index: 6; width: auto; }
   .set-row { grid-template-columns: 1fr; }
   .set-row .note { grid-column: 1; }
   .brand > div { display: none; }
@@ -341,6 +423,10 @@ input, select { font: inherit; }
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5"/><path d="M12 12v10"/></svg>
     Machine
   </button>
+  <button class="nav-btn" data-view="custom">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/></svg>
+    Custom
+  </button>
   <div class="group">Topics</div>
   <div class="side-topics" id="side-topics"></div>
 </nav>
@@ -354,21 +440,13 @@ input, select { font: inherit; }
       <button class="btn small" id="btn-retry">Retry</button>
       <button class="btn small" id="btn-demo">Show demo data</button>
     </div>
-    <div class="card">
-      <div class="card-h"><span class="grow">Subscribed topics</span></div>
-      <div class="card-b">
-        <div class="subscribe">
-          <input class="field-input" id="topics-input" spellcheck="false" placeholder="spi_agent, eekf_plugin, fmu_multibody_model" />
-          <button class="btn primary" id="btn-subscribe">Subscribe</button>
-        </div>
-        <div class="hint">Comma-separated MADS topics, one WebSocket each. <span class="mono">_all</span> receives everything but without the topic name. Hover a number in a message and press ◦ to plot it.</div>
+    <div class="card sub-bar" id="sub-bar">
+      <div class="subscribe">
+        <span class="sub-lbl">Topics</span>
+        <input class="field-input" id="topics-input" spellcheck="false" placeholder="spi_agent, eekf_plugin, fmu_multibody_model" />
+        <button class="btn primary" id="btn-subscribe">Subscribe</button>
+        <span class="help" title="Comma-separated MADS topics, one WebSocket each. _all receives everything but without the topic name. The Message button of a card shows its latest message; there, ◦ next to a number adds it to the selected plot of the Custom view.">?</span>
       </div>
-    </div>
-
-    <div class="card pinned" id="pinned-card" hidden>
-      <div class="card-h"><span class="grow">Pinned signals</span><button class="btn small" id="btn-unpin-all">Clear</button><button class="icon-btn sm max-btn" title="Enlarge (Esc to close)" aria-label="Enlarge"></button></div>
-      <div class="card-b" style="padding-bottom:8px"><div class="plot-box resizable" data-size="pinned"><canvas id="pinned-plot"></canvas></div></div>
-      <div class="pin-chips" id="pin-chips"></div>
     </div>
 
     <div class="topic-grid" id="topic-grid"></div>
@@ -450,7 +528,35 @@ input, select { font: inherit; }
       </div>
     </div>
   </section>
+
+  <!-- ═════════════ CUSTOM PLOTS ═════════════ -->
+  <section class="view" id="view-custom" hidden>
+    <div class="cp">
+      <aside class="card cp-fields" id="cp-fields">
+        <div class="card-h"><span class="grow">Fields</span><button class="icon-btn sm" id="cp-fields-close" title="Hide the list" aria-label="Hide the list">✕</button></div>
+        <div class="cp-search"><input class="field-input" id="cp-search" spellcheck="false" placeholder="Filter, e.g. force or torque" /></div>
+        <div class="cp-target" id="cp-target"></div>
+        <div class="cp-list" id="cp-list"></div>
+      </aside>
+      <div class="cp-main">
+        <div class="cp-bar">
+          <button class="btn on" id="cp-fields-btn">Fields</button>
+          <button class="btn primary" id="cp-add">+ New plot</button>
+          <span class="hint">Drag a field (or a whole array) onto a plot, or onto the bar that appears at the bottom for a new plot. A tick adds it to the selected plot. Chips can be dragged between plots.</span>
+        </div>
+        <div class="cp-scroll" id="cp-scroll">
+          <div class="cp-empty" id="cp-empty">
+            <div>No custom plots yet.<br>Drop a field here, tick one in the list, or</div>
+            <button class="btn primary" id="cp-add-2">+ New plot</button>
+          </div>
+          <div class="cp-grid" id="cp-grid"></div>
+        </div>
+        <div class="cp-new" id="cp-new">+ Drop here for a new plot</div>
+      </div>
+    </div>
+  </section>
 </main>
+<div class="toast" id="toast"></div>
 
 <!-- ═════════════ SETTINGS ═════════════ -->
 <div class="modal-bg" id="settings" hidden>
@@ -523,7 +629,11 @@ const DEFAULTS = {
   telemetryHz: 50,
   plotsOff: [],        // topics whose card plots are switched off
   sizes: {},           // heights of the plots resized by hand [px]
-  pins: [],            // [{topic, path: [..]}]
+  pins: [],            // old pinned signals, moved to a custom plot on load
+  custom: [],          // custom plots: [{id, title, fields: [{topic, key, c}]}], c = colour index
+  customActive: "",    // id of the selected custom plot (ticks in the field list go there)
+  fieldsOpen: true,    // field list of the Custom view shown
+  treeOn: [],          // topics whose card shows the message tree
   view: "telemetry",
 };
 
@@ -705,10 +815,25 @@ class TimePlot {
     const empty = !(hi >= lo);
     if (empty) { lo = -1; hi = 1; }
     let span = hi - lo;
-    if (span < this.minSpan) { const m = (hi + lo) / 2; lo = m - this.minSpan / 2; hi = m + this.minSpan / 2; span = this.minSpan; }
+    // a constant signal: a range of 10 % around its value (or the plot's minimum span), not a near-zero one
+    const mid = (hi + lo) / 2;
+    if (span <= Math.max(this.minSpan, Math.abs(mid) * 1e-9)) {
+      span = Math.max(this.minSpan, Math.abs(mid) * 0.1 || 1);
+      lo = mid - span / 2; hi = mid + span / 2;
+    }
     lo -= span * 0.08; hi += span * 0.08;
-    const L = this.compact ? 2 : 52, R = this.compact ? 2 : 10, B = this.compact ? 3 : 22;
     ctx.font = PLOT_FONT;
+    // left margin: wide enough for the longest y label (small or large values)
+    let L = 2;
+    if (!this.compact) {
+      let st = niceStep((hi - lo) / Math.max(2, Math.floor((h - 50) / 38)));
+      const nT = (x) => Math.floor(hi / x) - Math.ceil(lo / x) + 1;
+      for (const k of [2, 2.5, 2]) if (nT(st) < 3) st /= k;
+      let wmax = 0;
+      for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) wmax = Math.max(wmax, ctx.measureText(fmtTick(v, st)).width);
+      L = Math.max(52, Math.ceil(wmax) + 12);
+    }
+    const R = this.compact ? 2 : 10, B = this.compact ? 3 : 22;
     // legend: as many rows as needed, above the plot
     const legend = [];
     if (!this.compact) {
@@ -875,7 +1000,7 @@ function wantedTopics() {
   const set = new Set(telemetryTopics());
   if (cfg.ekfTopic) set.add(cfg.ekfTopic);
   if (cfg.kpiTopic) set.add(cfg.kpiTopic);
-  for (const p of cfg.pins) set.add(p.topic);
+  for (const d of cfg.custom) for (const f of d.fields) set.add(f.topic);
   return set;
 }
 
@@ -994,7 +1119,7 @@ function handleMessage(topic, msg, t) {
     const k = msg && typeof msg === "object" ? msg[cfg.kpiField] : undefined;
     if (k !== undefined) kpi.onKpi(topic, k, t);
   }
-  pins.onMessage(topic, msg, t);
+  catalog.onMessage(topic, msg, t);
   const card = cards.get(topic);
   if (card && card.plotsOn) card.plots.onMessage(msg, t);
 }
@@ -1035,21 +1160,34 @@ function syncTopicCards() {
     el.className = "card topic-card";
     el.innerHTML = `<div class="card-h"><div class="dot idle"></div><span class="tname"></span><span class="grow"></span><span class="stats"></span>
       <button class="btn small" data-act="plots">Plots</button>
+      <button class="btn small" data-act="tree" title="Latest message as a live tree">Message</button>
       <button class="btn small" data-act="expand" title="Open or close every node of the message">Open all</button>
       <button class="icon-btn sm max-btn" title="Enlarge (Esc to close)" aria-label="Enlarge"></button></div>
       <div class="meta"></div><div class="tp"></div><div class="tree-wrap"><div class="tree"></div></div>`;
     el.querySelector(".tname").textContent = name;
     const treeEl = el.querySelector(".tree");
     const card = { el, dot: el.querySelector(".dot"), statsEl: el.querySelector(".stats"), metaEl: el.querySelector(".meta"),
-                   tree: new JsonTree(treeEl, name), empty: true,
-                   plots: new TopicPlots(el.querySelector(".tp"), name), plotsOn: !cfg.plotsOff.includes(name) };
-    const pb = el.querySelector('[data-act="plots"]');
-    const setPlots = (on) => {
-      card.plotsOn = on; pb.classList.toggle("on", on); el.querySelector(".tp").hidden = !on;
-      cfg.plotsOff = cfg.plotsOff.filter((x) => x !== name).concat(on ? [] : [name]); saveSettings();
+                   tree: new JsonTree(treeEl, name), empty: true, treeWrap: el.querySelector(".tree-wrap"),
+                   plots: new TopicPlots(el.querySelector(".tp"), name), plotsOn: !cfg.plotsOff.includes(name),
+                   treeOn: cfg.treeOn.includes(name) };
+    const pb = el.querySelector('[data-act="plots"]'), tb = el.querySelector('[data-act="tree"]'), eb = el.querySelector('[data-act="expand"]');
+    // without plots the tree is always shown, otherwise the card would be empty
+    const apply = () => {
+      const tree = card.treeOn || !card.plotsOn;
+      pb.classList.toggle("on", card.plotsOn); tb.classList.toggle("on", tree); tb.hidden = !card.plotsOn;
+      el.querySelector(".tp").hidden = !card.plotsOn; el.classList.toggle("plots-off", !card.plotsOn);
+      card.treeWrap.hidden = !tree; eb.hidden = !tree;
+      const s = topics.get(name); if (tree && s) s.treeDirty = s.latest !== undefined;
     };
-    setPlots(card.plotsOn);
-    pb.addEventListener("click", () => setPlots(!card.plotsOn));
+    pb.addEventListener("click", () => {
+      card.plotsOn = !card.plotsOn; apply();
+      cfg.plotsOff = cfg.plotsOff.filter((x) => x !== name).concat(card.plotsOn ? [] : [name]); saveSettings();
+    });
+    tb.addEventListener("click", () => {
+      card.treeOn = !card.treeOn; apply();
+      cfg.treeOn = cfg.treeOn.filter((x) => x !== name).concat(card.treeOn ? [name] : []); saveSettings();
+    });
+    apply();
     treeEl.innerHTML = '<div class="empty">Waiting for messages…</div>';
     el.querySelector('[data-act="expand"]').addEventListener("click", (ev) => {
       const b = ev.currentTarget; const open = b.textContent === "Open all";
@@ -1061,6 +1199,7 @@ function syncTopicCards() {
   }
   // keep the subscription order
   for (const name of want) grid.appendChild(cards.get(name).el);
+  scheduleLayout();
 }
 function removeTopicCard(name) {
   const c = cards.get(name);
@@ -1077,7 +1216,12 @@ class TopicPlots {
     this.root = root; this.topic = topic; this.arrays = new Map(); this.scalars = new Map();
     root.innerHTML = '<div class="tp-arrays"></div><div class="tp-scalars"></div><div class="tp-none">Waiting for numbers…</div>';
     this.aEl = root.children[0]; this.sEl = root.children[1]; this.noneEl = root.children[2];
+    root.classList.add("no-arrays");
+    this.aEl._tp = this;
+    if (arraysObserver) arraysObserver.observe(this.aEl);
   }
+  // the array plots share the card: as many columns and rows as fit, each about 2.4:1
+  layout() { tileGrid(this.aEl, this.arrays.size, { gap: 10, minW: 240, minH: 115, aspect: 2.4 }, this.aEl.clientHeight); }
   onMessage(msg, t) { this.walk(msg, [], t, 0); }
   walk(v, path, t, depth) {
     if (depth > 5) return;
@@ -1100,10 +1244,10 @@ class TopicPlots {
   }
   addArray(key, n) {
     this.noneEl.hidden = true;
+    this.root.classList.remove("no-arrays");
     const el = document.createElement("div"); el.className = "tp-plot";
-    el.innerHTML = '<div class="tp-title"></div><div class="plot-box tp-box resizable"><canvas></canvas></div>';
+    el.innerHTML = '<div class="tp-title"></div><div class="plot-box tp-box"><canvas></canvas></div>';
     el.querySelector(".tp-title").textContent = key;
-    makeResizable(el.querySelector(".plot-box"), `${this.topic}:${key}`);
     this.aEl.appendChild(el);
     const plot = new TimePlot(el.querySelector("canvas"), { window: cfg.window });
     let names = Array.from({ length: n }, (_, i) => `[${i}]`), colors = null;
@@ -1113,6 +1257,7 @@ class TopicPlots {
     plot.setSeries(names.map((nm, i) => ({ name: nm, color: colors ? colors[i] : undefined })));
     const g = { el, plot };
     this.arrays.set(key, g);
+    this.layout();
     return g;
   }
   pushScalar(path, v, t) {
@@ -1232,11 +1377,11 @@ class JsonTree {
   }
   addPin(el, path) {
     const b = document.createElement("button");
-    b.className = "pin"; b.textContent = "◦"; b.title = "Plot this value";
-    const id = pinId(this.topic, path);
-    if (pins.has(id)) { b.classList.add("on"); b.textContent = "●"; }
-    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); pins.toggle(this.topic, path); });
-    b.dataset.pin = id;
+    const key = pathStr(path);
+    b.className = "pin"; b.textContent = "◦"; b.title = "Add to the selected plot of the Custom view (remove it if already there)";
+    b.dataset.topic = this.topic; b.dataset.key = key;
+    if (custom.has(this.topic, key)) { b.classList.add("on"); b.textContent = "●"; }
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); custom.toggleFromTree(this.topic, key); });
     el.appendChild(b);
     return b;
   }
@@ -1265,7 +1410,7 @@ function renderTelemetry() {
     card.dot.className = "dot " + (demo || s.open ? (age < 2 ? "ok" : "warn") : "bad");
     card.statsEl.textContent = s.count ? `${s.hz.toFixed(0)} Hz · ${age < 1 ? "now" : age.toFixed(0) + " s ago"}` : (s.open || demo ? "no messages" : "closed");
     card.statsEl.title = `${s.count} messages received`;
-    if (s.treeDirty && s.latest !== undefined) {
+    if (s.treeDirty && s.latest !== undefined && !card.treeWrap.hidden) {
       s.treeDirty = false;
       card.tree.update(s.latest);
       const m = s.latest && typeof s.latest === "object" ? s.latest : {};
@@ -1274,6 +1419,8 @@ function renderTelemetry() {
       card.metaEl.textContent = [meta, tc, s.parseError && "invalid JSON: " + s.parseError].filter(Boolean).join("   ") || " ";
     }
   }
+  if (cfg.view === "custom") custom.renderList();
+  scheduleLayout();
 }
 
 function renderSideTopics() {
@@ -1300,45 +1447,426 @@ function renderSideTopics() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Pinned signals
+// Tiling: n equal cells in a grid that fills the available height, with the
+// number of columns whose cells come closest to the wanted aspect ratio. When
+// even the minimum height does not fit, rows keep minH and the parent scrolls.
 // ═════════════════════════════════════════════════════════════════════════════
-function pinId(topic, path) { return topic + "\u0000" + JSON.stringify(path); }
-const pins = {
-  plot: null,
-  has(id) { return cfg.pins.some((p) => pinId(p.topic, p.path) === id); },
-  toggle(topic, path) {
-    const id = pinId(topic, path);
-    const i = cfg.pins.findIndex((p) => pinId(p.topic, p.path) === id);
-    if (i >= 0) cfg.pins.splice(i, 1);
-    else { if (cfg.pins.length >= 8) cfg.pins.shift(); cfg.pins.push({ topic, path }); }
-    saveSettings(); this.rebuild();
+function tileGrid(el, n, o, H) {
+  const W = el.clientWidth;
+  if (!n || !W) { setLayout(el, "", "", ""); return 0; }
+  let best = null;
+  for (let c = 1; c <= n; c++) {
+    const r = Math.ceil(n / c);
+    const cw = (W - (c - 1) * o.gap) / c;
+    if (c > 1 && cw < o.minW) break;
+    if (c === 1 || Math.ceil(n / (c - 1)) > r) {    // skip counts that only add empty cells
+      const fitH = (H - (r - 1) * o.gap) / r;
+      const ch = Math.max(o.minH, fitH);
+      const score = Math.abs(Math.log(cw / ch / o.aspect)) + 0.12 * (c * r - n) + (fitH < o.minH ? 0.6 : 0);
+      if (!best || score < best.score) best = { c, r, fits: fitH >= o.minH, score };
+    }
+  }
+  const { c, r, fits } = best;
+  const h = fits ? H : r * o.minH + (r - 1) * o.gap;
+  setLayout(el, `repeat(${c}, minmax(0, 1fr))`, fits ? `repeat(${r}, minmax(0, 1fr))` : `repeat(${r}, ${o.minH}px)`, "");
+  return h;
+}
+function setLayout(el, cols, rows, height) {
+  const k = cols + "|" + rows + "|" + height;
+  if (el._layout === k) return;
+  el._layout = k;
+  el.style.gridTemplateColumns = cols; el.style.gridTemplateRows = rows;
+  if (height !== undefined && height !== "") el.style.height = height;
+}
+function setHeight(el, px) { const v = px ? Math.round(px) + "px" : ""; if (el.style.height !== v) el.style.height = v; }
+
+function layoutTelemetry() {
+  const view = $("view-telemetry"), grid = $("topic-grid");
+  if (view.hidden) return;
+  const n = cards.size;
+  if (!n) { setLayout(grid, "", ""); setHeight(grid, 0); return; }
+  const pad = parseFloat(getComputedStyle(view).paddingBottom) || 0;
+  const H = Math.max(200, view.clientHeight - grid.offsetTop - pad);
+  const phone = window.innerWidth <= 760;
+  setHeight(grid, tileGrid(grid, n, { gap: 14, minW: 340, minH: phone ? 480 : 360, aspect: 1.1 }, H));
+}
+function layoutCustom() {
+  if ($("view-custom").hidden) return;
+  const n = custom.plots.length;
+  $("cp-empty").hidden = n > 0;
+  const grid = $("cp-grid"), H = $("cp-scroll").clientHeight;
+  setHeight(grid, n ? tileGrid(grid, n, { gap: 14, minW: 340, minH: 230, aspect: 1.9 }, H) : 0);
+}
+let layoutQueued = false;
+function scheduleLayout() {
+  if (layoutQueued) return;
+  layoutQueued = true;
+  requestAnimationFrame(() => { layoutQueued = false; layoutTelemetry(); layoutCustom(); });
+}
+const layoutObserver = typeof ResizeObserver === "function" ? new ResizeObserver(scheduleLayout) : null;
+const arraysObserver = typeof ResizeObserver === "function"
+  ? new ResizeObserver((entries) => requestAnimationFrame(() => { for (const e of entries) if (e.target._tp) e.target._tp.layout(); }))
+  : null;
+window.addEventListener("resize", scheduleLayout);
+
+let toastTimer = null;
+function toast(text) {
+  const el = $("toast");
+  el.textContent = text; el.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Field catalog: every number (and boolean, as 0/1) seen on any topic, with its
+// recent history, so a field dropped on a custom plot shows its past at once.
+// Keys look like "eekf.force_n[0]"; an array of up to 64 numbers is also a group.
+// ═════════════════════════════════════════════════════════════════════════════
+const catalog = {
+  topics: new Map(),   // topic -> {name, fields: Map(key -> F), groups: Map(key -> G), order: [{f} | {g}]}
+  version: 0,          // changes when a field or group appears
+  MAX_FIELDS: 600,     // per topic
+  topic(name) {
+    let T = this.topics.get(name);
+    if (!T) { T = { name, fields: new Map(), groups: new Map(), order: [] }; this.topics.set(name, T); }
+    return T;
   },
-  rebuild() {
-    if (!this.plot) this.plot = new TimePlot($("pinned-plot"), { window: cfg.window });
-    this.plot.window = cfg.window;
-    this.plot.setSeries(cfg.pins.map((p) => ({ name: `${p.topic}:${pathStr(p.path)}` })));
-    $("pinned-card").hidden = cfg.pins.length === 0;
-    const chips = $("pin-chips"); chips.innerHTML = "";
-    cfg.pins.forEach((p, i) => {
-      const c = document.createElement("span"); c.className = "chip";
-      c.innerHTML = `<i style="background:${this.plot.series[i].color}"></i><span></span><button title="Remove">×</button>`;
-      c.querySelector("span").textContent = `${p.topic}:${pathStr(p.path)}`;
-      c.querySelector("button").addEventListener("click", () => this.toggle(p.topic, p.path));
-      chips.appendChild(c);
-    });
-    document.querySelectorAll(".tree .pin").forEach((b) => {
-      const on = this.has(b.dataset.pin); b.classList.toggle("on", on); b.textContent = on ? "●" : "◦";
-    });
+  // a field a plot refers to before its first message
+  ensure(topic, key) {
+    const T = this.topic(topic);
+    let F = T.fields.get(key);
+    if (!F) { F = { topic, key, t: [], v: [], seen: false, bool: false }; T.fields.set(key, F); }
+    return F;
+  },
+  get(topic, key) { const T = this.topics.get(topic); return T ? T.fields.get(key) : undefined; },
+  onMessage(topic, msg, t) { this.walk(this.topic(topic), msg, "", t, 0); },
+  walk(T, v, key, t, depth) {
+    if (typeof v === "number") { if (key) this.rec(T, key, v, t, null, false); return; }
+    if (typeof v === "boolean") { if (key) this.rec(T, key, v ? 1 : 0, t, null, true); return; }
+    if (v === null || typeof v !== "object" || depth > 6) return;
+    if (Array.isArray(v)) {
+      if (!v.length) return;
+      if (v.length <= 64 && v.every((x) => typeof x === "number")) {
+        let G = T.groups.get(key);
+        if (!G) {
+          if (T.fields.size >= this.MAX_FIELDS) return;
+          G = { key, elems: [] }; T.groups.set(key, G); T.order.push({ g: G }); this.version++;
+        }
+        for (let i = 0; i < v.length; i++) this.rec(T, `${key}[${i}]`, v[i], t, G, false);
+      } else if (v.length <= 16) {
+        for (let i = 0; i < v.length; i++) this.walk(T, v[i], `${key}[${i}]`, t, depth + 1);
+      }
+      return;
+    }
+    for (const k in v) this.walk(T, v[k], key ? key + "." + k : k, t, depth + 1);
+  },
+  rec(T, key, x, t, G, bool) {
+    let F = T.fields.get(key);
+    if (!F) {
+      if (T.fields.size >= this.MAX_FIELDS) return;
+      F = { topic: T.name, key, t: [], v: [], seen: false, bool: false }; T.fields.set(key, F);
+    }
+    if (!F.seen) {
+      F.seen = true; F.bool = bool;
+      if (G) G.elems.push(F); else T.order.push({ f: F });
+      this.version++;
+    }
+    // at most 4000 samples per time window; history of 3 windows (60 s at least)
+    const n = F.t.length;
+    if (n && t - F.t[n - 1] < cfg.window / 4000) F.v[n - 1] = x;
+    else { F.t.push(t); F.v.push(x); }
+    if (F.t.length > 64) {
+      const k = lowerBound(F.t, t - Math.max(cfg.window * 3, 60));
+      if (k > 256 || k > F.t.length / 2) { F.t.splice(0, k); F.v.splice(0, k); }
+    }
+  },
+};
+
+// series of a TimePlot that reads the catalog buffers directly
+function fieldSeries(F, name, color, hidden) {
+  return {
+    name, color, hidden: !!hidden, F,
+    get t() { return F.t; },
+    get v() { return F.v; },
+    get last() { return F.v.length ? F.v[F.v.length - 1] : NaN; },
+  };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Custom view: plots made by the user, tiled to fill the page
+// ═════════════════════════════════════════════════════════════════════════════
+const DRAG_TYPE = "application/x-umill-fields";
+const MAX_SERIES = SERIES_COLORS.length;   // 8 per plot, each with its own colour
+const ICON_DEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>';
+
+const custom = {
+  plots: [],                 // {def, el, plot, chipsEl, hintEl, titleEl}
+  listVersion: -1, listKey: "", rows: [],
+  open: new Set(),           // expanded array groups in the list ("topic\0key")
+  closedTopics: new Set(),   // collapsed topics in the list
+
+  init() {
+    if (!Array.isArray(cfg.custom)) cfg.custom = [];
+    // pinned signals of the older page become a plot
+    if (cfg.pins && cfg.pins.length) {
+      cfg.custom.push({ id: this.newId(), title: "Pinned", fields: cfg.pins.slice(0, MAX_SERIES).map((p, i) => ({ topic: p.topic, key: pathStr(p.path), c: i })) });
+      cfg.pins = []; saveSettings();
+    }
+    for (const d of cfg.custom) this.build(d);
+    if (!this.def(cfg.customActive)) cfg.customActive = cfg.custom.length ? cfg.custom[cfg.custom.length - 1].id : "";
+    this.markActive();
+
+    const add = () => { const d = this.newPlot(); this.setActive(d.id); };
+    $("cp-add").addEventListener("click", add);
+    $("cp-add-2").addEventListener("click", add);
+    if (window.innerWidth <= 760) cfg.fieldsOpen = false;
+    const showFields = (on) => { cfg.fieldsOpen = on; $("cp-fields").hidden = !on; $("cp-fields-btn").classList.toggle("on", on); saveSettings(); this.listKey = ""; this.renderList(); scheduleLayout(); };
+    $("cp-fields-btn").addEventListener("click", () => showFields(!cfg.fieldsOpen));
+    $("cp-fields-close").addEventListener("click", () => showFields(false));
+    $("cp-fields").hidden = !cfg.fieldsOpen; $("cp-fields-btn").classList.toggle("on", cfg.fieldsOpen);
+    $("cp-search").addEventListener("input", () => { this.listKey = ""; this.renderList(); });
+    this.dropTarget($("cp-new"), null);
+    this.dropTarget($("cp-empty"), null);
+    document.addEventListener("dragend", () => document.body.classList.remove("dragging-field"));
+    document.addEventListener("drop", () => document.body.classList.remove("dragging-field"), true);
+    if (layoutObserver) layoutObserver.observe($("cp-scroll"));
+  },
+
+  newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); },
+  def(id) { return cfg.custom.find((d) => d.id === id); },
+  entry(id) { return this.plots.find((p) => p.def.id === id); },
+  active() { return this.def(cfg.customActive); },
+  has(topic, key) { return cfg.custom.some((d) => d.fields.some((f) => f.topic === topic && f.key === key)); },
+  inPlot(d, topic, key) { return d ? d.fields.find((f) => f.topic === topic && f.key === key) : undefined; },
+
+  newPlot() {
+    let k = cfg.custom.length + 1;
+    while (cfg.custom.some((d) => d.title === `Plot ${k}`)) k++;
+    const d = { id: this.newId(), title: `Plot ${k}`, fields: [] };
+    cfg.custom.push(d); saveSettings();
+    this.build(d);
+    scheduleLayout();
+    return d;
+  },
+  removePlot(id) {
+    const e = this.entry(id);
+    if (e) { if (e.el.classList.contains("maximized")) setMax(e.el, false); e.el.remove(); }
+    this.plots = this.plots.filter((p) => p.def.id !== id);
+    cfg.custom = cfg.custom.filter((d) => d.id !== id);
+    if (cfg.customActive === id) cfg.customActive = cfg.custom.length ? cfg.custom[cfg.custom.length - 1].id : "";
+    saveSettings(); this.changed();
+  },
+  setActive(id) {
+    if (cfg.customActive === id) return;
+    cfg.customActive = id; saveSettings(); this.markActive(); this.listKey = ""; this.renderList();
+  },
+  markActive() { for (const p of this.plots) p.el.classList.toggle("active", p.def.id === cfg.customActive); },
+
+  // items: [{topic, key}]; returns how many were added
+  add(d, items) {
+    let added = 0, full = false;
+    for (const it of items) {
+      if (this.inPlot(d, it.topic, it.key)) continue;
+      if (d.fields.length >= MAX_SERIES) { full = true; break; }
+      const used = new Set(d.fields.map((f) => f.c));
+      let c = 0; while (used.has(c)) c++;
+      d.fields.push({ topic: it.topic, key: it.key, c }); added++;
+    }
+    if (full) toast(`A plot holds up to ${MAX_SERIES} signals: drop the others on a new plot.`);
+    if (added) this.changed();
+    return added;
+  },
+  remove(d, items) {
+    const n = d.fields.length;
+    d.fields = d.fields.filter((f) => !items.some((it) => it.topic === f.topic && it.key === f.key));
+    if (d.fields.length !== n) this.changed();
+  },
+  // after any change of the plots or their fields
+  changed() {
+    saveSettings();
+    for (const p of this.plots) this.refresh(p);
+    this.markActive();
+    this.refreshPins();
+    this.listKey = ""; this.renderList();
     syncConnections();
+    scheduleLayout();
   },
-  onMessage(topic, msg, t) {
-    if (!this.plot) return;
-    cfg.pins.forEach((p, i) => {
-      if (p.topic !== topic) return;
-      const v = getPath(msg, p.path);
-      if (typeof v === "number") this.plot.push(i, t, v);
+  toggleFromTree(topic, key) {
+    let d = this.active();
+    if (d && this.inPlot(d, topic, key)) { this.remove(d, [{ topic, key }]); toast(`Removed ${key} from “${d.title}”.`); return; }
+    if (!d) { d = this.newPlot(); cfg.customActive = d.id; }
+    if (this.add(d, [{ topic, key }])) toast(`Added ${key} to “${d.title}” (Custom view).`);
+  },
+  refreshPins() {
+    document.querySelectorAll(".tree .pin").forEach((b) => {
+      const on = this.has(b.dataset.topic, b.dataset.key);
+      b.classList.toggle("on", on); b.textContent = on ? "●" : "◦";
     });
   },
+
+  build(d) {
+    const el = document.createElement("div");
+    el.className = "card cp-card"; el.dataset.id = d.id;
+    el.innerHTML = `<div class="card-h"><input class="cp-title" spellcheck="false" aria-label="Plot title" /><span class="cp-tag" title="Ticks in the field list and ◦ in the Telemetry messages go to this plot">selected</span>
+        <button class="icon-btn sm max-btn" title="Enlarge (Esc to close)" aria-label="Enlarge"></button>
+        <button class="icon-btn sm cp-del" title="Delete this plot" aria-label="Delete this plot">${ICON_DEL}</button></div>
+      <div class="cp-chips"></div>
+      <div class="card-b"><div class="plot-box"><canvas></canvas><div class="cp-drop-hint">Drop fields here,<br>or tick them in the field list</div></div></div>`;
+    const p = { def: d, el, chipsEl: el.querySelector(".cp-chips"), hintEl: el.querySelector(".cp-drop-hint"), titleEl: el.querySelector(".cp-title"),
+                plot: new TimePlot(el.querySelector("canvas"), { window: cfg.window }) };
+    p.titleEl.value = d.title;
+    p.titleEl.addEventListener("change", () => { d.title = p.titleEl.value.trim() || d.title; p.titleEl.value = d.title; saveSettings(); this.listKey = ""; this.renderList(); });
+    p.titleEl.addEventListener("keydown", (e) => { if (e.key === "Enter") p.titleEl.blur(); });
+    el.addEventListener("pointerdown", () => this.setActive(d.id));
+    el.querySelector(".cp-del").addEventListener("click", (e) => { e.stopPropagation(); this.removePlot(d.id); });
+    initMaxButtons(el);
+    this.dropTarget(el, d.id);
+    this.plots.push(p);
+    $("cp-grid").appendChild(el);
+    this.refresh(p);
+    return p;
+  },
+  // series and chips of one plot, from its definition
+  refresh(p) {
+    const d = p.def;
+    const oneTopic = d.fields.every((f) => f.topic === (d.fields[0] || {}).topic);
+    const name = (f) => oneTopic ? f.key : `${f.topic}:${f.key}`;
+    const hidden = new Map(p.plot.series.map((s) => [s.F.topic + "\u0000" + s.F.key, s.hidden]));
+    p.plot.series = d.fields.map((f) => fieldSeries(catalog.ensure(f.topic, f.key), name(f), SERIES_COLORS[f.c % SERIES_COLORS.length], hidden.get(f.topic + "\u0000" + f.key)));
+    p.plot.window = cfg.window;
+    p.hintEl.hidden = d.fields.length > 0;
+    p.chipsEl.innerHTML = "";
+    for (const f of d.fields) {
+      const c = document.createElement("span");
+      c.className = "chip"; c.draggable = true; c.title = `${f.topic}:${f.key} — drag to another plot to move it`;
+      c.innerHTML = `<i style="background:${SERIES_COLORS[f.c % SERIES_COLORS.length]}"></i><span></span><button title="Remove" aria-label="Remove">×</button>`;
+      c.querySelector("span").textContent = name(f);
+      c.querySelector("button").addEventListener("click", (e) => { e.stopPropagation(); this.remove(d, [f]); });
+      c.addEventListener("dragstart", (e) => this.dragStart(e, [{ topic: f.topic, key: f.key }], d.id));
+      p.chipsEl.appendChild(c);
+    }
+  },
+
+  // ── drag and drop ──
+  dragStart(e, items, from) {
+    const data = JSON.stringify({ items, from });
+    e.dataTransfer.setData(DRAG_TYPE, data);
+    e.dataTransfer.setData("text/plain", items.map((i) => `${i.topic}:${i.key}`).join(", "));
+    e.dataTransfer.effectAllowed = from ? "move" : "copy";
+    requestAnimationFrame(() => document.body.classList.add("dragging-field"));
+  },
+  dropTarget(el, id) {
+    const ok = (e) => [...e.dataTransfer.types].includes(DRAG_TYPE);
+    el.addEventListener("dragover", (e) => {
+      if (!ok(e)) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = e.dataTransfer.effectAllowed === "move" ? "move" : "copy";
+      el.classList.add("drop-on");
+    });
+    el.addEventListener("dragleave", (e) => { if (!el.contains(e.relatedTarget)) el.classList.remove("drop-on"); });
+    el.addEventListener("drop", (e) => {
+      el.classList.remove("drop-on");
+      document.body.classList.remove("dragging-field");
+      if (!ok(e)) return;
+      e.preventDefault();
+      let data; try { data = JSON.parse(e.dataTransfer.getData(DRAG_TYPE)); } catch (_) { return; }
+      if (!data || !Array.isArray(data.items) || (id && data.from === id)) return;
+      const d = id ? this.def(id) : this.newPlot();
+      if (!d) return;
+      const src = data.from ? this.def(data.from) : null;
+      if (src) src.fields = src.fields.filter((f) => !data.items.some((it) => it.topic === f.topic && it.key === f.key));
+      const n = this.add(d, data.items);
+      if (src && !n) this.changed();
+      this.setActive(d.id);
+    });
+  },
+
+  // ── field list ──
+  renderList() {
+    if (cfg.view !== "custom" || !cfg.fieldsOpen) return;
+    if (document.body.classList.contains("dragging-field")) { this.updateList(); return; }
+    const q = $("cp-search").value.trim().toLowerCase();
+    const key = catalog.version + "|" + q + "|" + cfg.customActive + "|" + [...topics.keys()].join(",");
+    if (key === this.listKey) { this.updateList(); return; }
+    this.listKey = key;
+    const box = $("cp-list"), top = box.scrollTop;
+    box.innerHTML = ""; this.rows = [];
+    const match = (topic, k) => !q || `${topic}:${k}`.toLowerCase().includes(q);
+    let any = false;
+    for (const T of catalog.topics.values()) {
+      if (!topics.has(T.name)) continue;
+      const items = T.order.filter((it) => it.f ? match(T.name, it.f.key) : (match(T.name, it.g.key) || it.g.elems.some((F) => match(T.name, F.key))));
+      if (!items.length) continue;
+      any = true;
+      const closed = !q && this.closedTopics.has(T.name);
+      const head = document.createElement("div"); head.className = "cp-topic";
+      head.innerHTML = `<span class="cp-tw">${closed ? "▸" : "▾"}</span><span></span><span class="n"></span>`;
+      head.children[1].textContent = T.name;
+      head.children[2].textContent = T.fields.size;
+      head.addEventListener("click", () => {
+        if (this.closedTopics.has(T.name)) this.closedTopics.delete(T.name); else this.closedTopics.add(T.name);
+        this.listKey = ""; this.renderList();
+      });
+      box.appendChild(head);
+      if (closed) continue;
+      for (const it of items) {
+        if (it.f) { this.row(box, T.name, [it.f], it.f.key, false); continue; }
+        const G = it.g, gid = T.name + "\u0000" + G.key, open = !!q || this.open.has(gid);
+        const r = this.row(box, T.name, G.elems, G.key, false, G);
+        r.tw.textContent = open ? "▾" : "▸";
+        r.tw.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (this.open.has(gid)) this.open.delete(gid); else this.open.add(gid);
+          this.listKey = ""; this.renderList();
+        });
+        if (open) for (const F of G.elems) if (match(T.name, F.key)) this.row(box, T.name, [F], F.key.slice(G.key.length), true);
+      }
+    }
+    if (!any) box.innerHTML = `<div class="empty">${q ? "No field matches." : "No fields yet: they appear here as messages arrive on the topics subscribed in Telemetry."}</div>`;
+    const d = this.active();
+    $("cp-target").innerHTML = d ? "Ticks go to <b></b>" : "A tick creates a new plot.";
+    if (d) $("cp-target").querySelector("b").textContent = d.title;
+    box.scrollTop = top;
+    this.updateList();
+  },
+  row(box, topic, fields, label, child, G) {
+    const el = document.createElement("div");
+    el.className = "cp-row" + (child ? " child" : ""); el.draggable = true;
+    el.innerHTML = `<span class="cp-tw"></span><input type="checkbox" /><span class="sw"></span><span class="nm"></span><span class="val"></span>`;
+    if (child) el.firstChild.remove();
+    const nm = el.querySelector(".nm"); nm.textContent = label;
+    if (G) { const sm = document.createElement("small"); sm.textContent = `[${G.elems.length}]`; nm.appendChild(sm); }
+    el.title = `${topic}:${label}${G ? " — the whole array" : ""}. Drag onto a plot, or tick to add it to the selected plot.`;
+    const r = { el, topic, fields, G, cb: el.querySelector("input"), sw: el.querySelector(".sw"), val: el.querySelector(".val"), tw: el.querySelector(".cp-tw"), shown: "" };
+    const items = () => r.fields.map((F) => ({ topic, key: F.key }));
+    r.cb.addEventListener("click", (e) => e.stopPropagation());
+    r.cb.addEventListener("change", () => {
+      let d = this.active();
+      if (!r.cb.checked && d) { this.remove(d, items()); return; }
+      if (!d) { d = this.newPlot(); cfg.customActive = d.id; this.markActive(); }
+      this.add(d, items());
+      this.updateList();
+    });
+    el.addEventListener("click", () => r.cb.click());
+    el.addEventListener("dragstart", (e) => this.dragStart(e, items(), null));
+    box.appendChild(el);
+    this.rows.push(r);
+    return r;
+  },
+  // values, ticks and colours, a few times a second
+  updateList() {
+    const d = this.active();
+    for (const r of this.rows) {
+      let inN = 0, color = "";
+      for (const F of r.fields) { const f = this.inPlot(d, r.topic, F.key); if (f) { inN++; color = SERIES_COLORS[f.c % SERIES_COLORS.length]; } }
+      r.cb.checked = inN > 0 && inN === r.fields.length;
+      r.cb.indeterminate = inN > 0 && inN < r.fields.length;
+      r.sw.style.background = inN && !r.G ? color : "transparent";
+      let txt;
+      if (r.G) txt = "";                     // arrays: open the row to see the values
+      else { const F = r.fields[0], v = F.v[F.v.length - 1]; txt = v === undefined ? "" : F.bool ? (v ? "true" : "false") : fmtAuto(v); }
+      if (txt !== r.shown) { r.val.textContent = txt; r.shown = txt; }
+    }
+  },
+  applySettings() { for (const p of this.plots) p.plot.window = cfg.window; },
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1913,8 +2441,11 @@ function showView(v) {
   document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
   $("view-telemetry").hidden = v !== "telemetry";
   $("view-machine").hidden = v !== "machine";
+  $("view-custom").hidden = v !== "custom";
   if (machine.scene) machine.scene.dirty = true;
   for (const s of topics.values()) s.treeDirty = s.latest !== undefined;
+  if (v === "custom") { custom.listKey = ""; custom.renderList(); }
+  scheduleLayout();
 }
 
 function parseTopicList(text) {
@@ -1954,7 +2485,8 @@ function applySettingsForm() {
   saveSettings();
   if (oldKpi !== cfg.kpiTopic + "|" + cfg.kpiField) kpi.reset();
   machine.applySettings();
-  pins.rebuild();
+  custom.applySettings();
+  syncConnections();
   $("settings").hidden = true;
 }
 
@@ -1966,15 +2498,16 @@ function frame() {
   // with a card enlarged, only that card is visible: draw only its plots
   const maxCard = document.querySelector(".card.maximized");
   const shown = (el) => !maxCard || maxCard.contains(el);
-  if (!$("view-machine").hidden) {
+  if (cfg.view === "machine") {
     if (machine.scene && shown(machine.scene.canvas)) machine.scene.render();
     if (drawPlots) {
       for (const pl of [machine.force, machine.posLin, machine.posRot, machine.nis]) if (shown(pl.c)) pl.draw(t);
       for (const tile of kpi.tiles.values()) if (shown(tile.el)) tile.plot.draw(t);
     }
     machine.renderStatus();
+  } else if (drawPlots && cfg.view === "custom") {
+    for (const p of custom.plots) if (shown(p.el)) { p.plot.window = cfg.window; p.plot.draw(t); }
   } else if (drawPlots) {
-    if (pins.plot && cfg.pins.length && shown(pins.plot.c)) pins.plot.draw(t);
     const H = window.innerHeight;
     for (const c of cards.values()) {
       if (!c.plotsOn || !shown(c.el)) continue;
@@ -1990,12 +2523,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("topics-input").value = cfg.topics.join(", ");
   $("btn-subscribe").addEventListener("click", () => { cfg.topics = parseTopicList($("topics-input").value); saveSettings(); syncConnections(); });
   $("topics-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-subscribe").click(); });
-  $("btn-unpin-all").addEventListener("click", () => { cfg.pins = []; saveSettings(); pins.rebuild(); });
   $("btn-settings").addEventListener("click", openSettings);
   $("btn-close-settings").addEventListener("click", () => { $("settings").hidden = true; });
   $("settings").addEventListener("click", (e) => { if (e.target === $("settings")) $("settings").hidden = true; });
   $("btn-save-settings").addEventListener("click", applySettingsForm);
-  $("btn-reset-settings").addEventListener("click", () => { const keep = { topics: cfg.topics, pins: cfg.pins, view: cfg.view }; cfg = Object.assign(clone(DEFAULTS), keep); openSettings(); });
+  $("btn-reset-settings").addEventListener("click", () => { const keep = { topics: cfg.topics, custom: cfg.custom, customActive: cfg.customActive, fieldsOpen: cfg.fieldsOpen, treeOn: cfg.treeOn, plotsOff: cfg.plotsOff, view: cfg.view }; cfg = Object.assign(clone(DEFAULTS), keep); openSettings(); });
   $("btn-retry").addEventListener("click", () => { if (demo) { location.href = location.pathname; return; } fetchBootstrap().then((ok) => ok && syncConnections()); });
   $("btn-demo").addEventListener("click", startDemo);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { $("settings").hidden = true; closeMax(); } });
@@ -2004,8 +2536,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.querySelectorAll(".plot-box.resizable[data-size]").forEach((b) => makeResizable(b, b.dataset.size));
 
   machine.init();
-  pins.rebuild();
-  showView(cfg.view === "machine" ? "machine" : "telemetry");
+  custom.init();
+  if (layoutObserver) { layoutObserver.observe($("view-telemetry")); layoutObserver.observe($("sub-bar")); layoutObserver.observe($("banner")); }
+  syncConnections();
+  showView(["machine", "custom"].includes(cfg.view) ? cfg.view : "telemetry");
   setInterval(renderTelemetry, 250);
   requestAnimationFrame(frame);
 
